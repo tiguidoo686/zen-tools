@@ -51,11 +51,14 @@ Direct, simple, max 4 points per section.`,
 2. POURQUOI ÇA ARRIVE
 3. QUOI DIRE À CLAUDE CODE (prompt exact à copier-coller)`,
 
-  debugConvo: `Tu analyses des conversations problématiques avec Claude Code. Explique:
-1. CE QUI A MAL TOURNÉ
-2. POURQUOI (français simple)
-3. EXACTEMENT QUOI ÉCRIRE À CLAUDE CODE pour recadrer sans recommencer
-Donne le message exact à copier-coller à la fin.`,
+  debugConvo: `You are an expert at analyzing problematic conversations between a user and Claude Code (the AI coding tool). The user is building ZenAlpha, a React Native/Expo app.
+
+When the user pastes a conversation that went wrong, you must:
+1. IDENTIFY WHAT WENT WRONG — why did Claude Code misunderstand or do the wrong thing
+2. EXPLAIN WHY in simple French (2-3 lines max)
+3. GIVE THE EXACT MESSAGE TO SEND TO CLAUDE CODE — a ready-to-copy prompt in English that will fix the situation without starting over
+
+IMPORTANT: Your response is always about fixing the CODE in ZenAlpha using Claude Code. Never give advice about what to say to Lia or ZenAlpha the app. Always end with a ready-to-copy Claude Code prompt.`,
 
   sessionSummary: `Tu résumes des sessions de travail avec Claude Code. Génère en français:
 📋 CE QUI A ÉTÉ ACCOMPLI
