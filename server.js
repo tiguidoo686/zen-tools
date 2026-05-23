@@ -1,3 +1,5 @@
+console.log("ENV CHECK:", process.env.PORT, process.env.ANTHROPIC_API_KEY ? "KEY OK" : "NO KEY");
+
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
@@ -11,12 +13,13 @@ app.use(cors());
 app.use(express.json());
 
 app.post("/api/claude", async (req, res) => {
-  const { system, content } = req.body;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  console.log("[claude] API key:", apiKey ? apiKey.slice(0, 10) + "..." : "MISSING");
-  const requestBody = { model: "claude-sonnet-4-20250514", max_tokens: 1500, system, messages: [{ role: "user", content }] };
-  console.log("[claude] Request body:", JSON.stringify(requestBody, null, 2));
   try {
+    const { system, content } = req.body;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    console.log("[claude] API key:", apiKey ? apiKey.slice(0, 10) + "..." : "MISSING");
+    const requestBody = { model: "claude-sonnet-4-20250514", max_tokens: 1500, system, messages: [{ role: "user", content }] };
+    console.log("[claude] Request body:", JSON.stringify(requestBody, null, 2));
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -34,8 +37,8 @@ app.post("/api/claude", async (req, res) => {
     const text = (data.content || []).map((b) => b.text || "").join("");
     res.json({ text });
   } catch (err) {
-    console.log("[claude] Fetch error:", err);
-    res.status(500).json({ error: err.message });
+    console.log("[claude] Unhandled error:", err);
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
