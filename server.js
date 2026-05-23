@@ -12,28 +12,29 @@ app.use(express.json());
 
 app.post("/api/claude", async (req, res) => {
   const { system, content } = req.body;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  console.log("[claude] API key:", apiKey ? apiKey.slice(0, 10) + "..." : "MISSING");
+  const requestBody = { model: "claude-sonnet-4-20250514", max_tokens: 1500, system, messages: [{ role: "user", content }] };
+  console.log("[claude] Request body:", JSON.stringify(requestBody, null, 2));
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1500,
-        system,
-        messages: [{ role: "user", content }],
-      }),
+      body: JSON.stringify(requestBody),
     });
     const data = await response.json();
     if (!response.ok) {
+      console.log("[claude] Error response:", JSON.stringify(data, null, 2));
       return res.status(response.status).json({ error: data?.error?.message || JSON.stringify(data) });
     }
     const text = (data.content || []).map((b) => b.text || "").join("");
     res.json({ text });
   } catch (err) {
+    console.log("[claude] Fetch error:", err);
     res.status(500).json({ error: err.message });
   }
 });
