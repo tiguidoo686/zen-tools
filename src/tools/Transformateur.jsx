@@ -9,19 +9,14 @@ function save(key, val) {
 }
 
 async function callAPI(system, content) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1500,
-      system,
-      messages: [{ role: "user", content }],
-    }),
+    body: JSON.stringify({ system, content }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(`${res.status} — ${data?.error?.message || JSON.stringify(data)}`);
-  return (data.content || []).map((b) => b.text || "").join("");
+  if (!res.ok) throw new Error(`${res.status} — ${data?.error || JSON.stringify(data)}`);
+  return data.text;
 }
 
 const SYS = {
