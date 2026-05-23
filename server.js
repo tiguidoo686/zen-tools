@@ -17,7 +17,7 @@ app.post("/api/claude", async (req, res) => {
     const { system, content } = req.body;
     const apiKey = process.env.ANTHROPIC_API_KEY;
     console.log("[claude] API key:", apiKey ? apiKey.slice(0, 10) + "..." : "MISSING");
-    const requestBody = { model: "claude-sonnet-4-20250514", max_tokens: 1500, system, messages: [{ role: "user", content }] };
+    const requestBody = { model: "claude-sonnet-4-6", max_tokens: 1500, system, messages: [{ role: "user", content }] };
     console.log("[claude] Request body:", JSON.stringify(requestBody, null, 2));
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
