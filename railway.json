@@ -3,7 +3,6 @@
     "builder": "DOCKERFILE"
   },
   "deploy": {
-    "port": 3000,
     "restartPolicyType": "ON_FAILURE"
   }
 }
