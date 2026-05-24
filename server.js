@@ -78,18 +78,48 @@ app.post("/api/history", async (req, res) => {
 
 app.get("/api/history", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    console.log("[history] GET — querying table: zen_tools_history");
+    const response = await supabase
       .from("zen_tools_history")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(20);
-    console.log("[history] Fetch rows:", data ? data.length : 0, error ? "error:" + error.message : "no error");
+    console.log("[history] GET full response:", JSON.stringify(response));
+    const { data, error } = response;
     if (error) throw error;
+    console.log("[history] GET rows returned:", data ? data.length : 0);
     res.json(data);
   } catch (err) {
     console.log("[history] Fetch error:", err.message || err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/api/history/test", async (req, res) => {
+  const results = {};
+  try {
+    const insertResp = await supabase
+      .from("zen_tools_history")
+      .insert({ prompt: "[test] ping", result: "[test] pong" });
+    results.insert = JSON.stringify(insertResp);
+    console.log("[history/test] Insert response:", results.insert);
+  } catch (err) {
+    results.insertError = err.message;
+    console.log("[history/test] Insert error:", err.message);
+  }
+  try {
+    const selectResp = await supabase
+      .from("zen_tools_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(3);
+    results.select = JSON.stringify(selectResp);
+    console.log("[history/test] Select response:", results.select);
+  } catch (err) {
+    results.selectError = err.message;
+    console.log("[history/test] Select error:", err.message);
+  }
+  res.json(results);
 });
 
 app.use(express.static(join(__dirname, "dist")));
