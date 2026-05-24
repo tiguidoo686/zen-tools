@@ -447,20 +447,26 @@ function TabNotes() {
   );
 }
 
-function TabHistory({ history, setHistory }) {
+function TabHistory({ history, loading, onClear }) {
   function exportHistory() {
-    const text = history.map(h => `[${h.time} — ${h.date}]\n\nIDÉE: ${h.prompt}\n\nPROMPT:\n${h.result}\n\n${"─".repeat(60)}`).join("\n\n");
+    const text = history.map(h => {
+      const d = new Date(h.created_at);
+      const date = d.toLocaleDateString("fr-CA");
+      const time = d.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
+      return `[${time} — ${date}]\n\nIDÉE: ${h.prompt}\n\nPROMPT:\n${h.result}\n\n${"─".repeat(60)}`;
+    }).join("\n\n");
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "historique-prompts-zenalpha.txt"; a.click();
     URL.revokeObjectURL(url);
   }
+  if (loading) return <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}><p style={{ color: "#7b6fa0" }}>Chargement...</p></div>;
   return (
     <div>
       {history.length > 0 && (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
           <button onClick={exportHistory} style={{ ...cs.btnSec, fontSize: 12, padding: "6px 14px" }}>📥 Exporter (.txt)</button>
-          <button onClick={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} style={cs.btnRed}>🗑️ Effacer</button>
+          <button onClick={onClear} style={cs.btnRed}>🗑️ Effacer</button>
         </div>
       )}
       {history.length === 0 ? (
@@ -468,15 +474,20 @@ function TabHistory({ history, setHistory }) {
           <p style={{ fontSize: 24, marginBottom: 8 }}>🕐</p>
           <p style={{ fontSize: 14, color: "#7b6fa0" }}>Aucun historique. Transforme une demande pour commencer.</p>
         </div>
-      ) : history.map(h => (
-        <div key={h.id} style={cs.card}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: "#9e96c0" }}>🕐 {h.time} — {h.date}</span>
-            <CopyBtn text={h.result} label="Copier le prompt" />
+      ) : history.map(h => {
+        const d = new Date(h.created_at);
+        const date = d.toLocaleDateString("fr-CA");
+        const time = d.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
+        return (
+          <div key={h.id} style={cs.card}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: "#9e96c0" }}>🕐 {time} — {date}</span>
+              <CopyBtn text={h.result} label="Copier le prompt" />
+            </div>
+            <p style={{ fontSize: 14, color: "#1a1528", margin: 0 }}>📝 {h.prompt}</p>
           </div>
-          <p style={{ fontSize: 14, color: "#1a1528", margin: 0 }}>📝 {h.prompt}</p>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -487,15 +498,34 @@ export default function Transformateur() {
   const [lang, setLang] = useState(() => load("za_lang", "en"));
   const [master, setMaster] = useState(() => load("za_master", ""));
   const [showMaster, setShowMaster] = useState(false);
-  const [history, setHistory] = useState(() => load("za_prompt_history", []));
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [transformInput, setTransformInput] = useState("");
 
   useEffect(() => save("za_lang", lang), [lang]);
-  useEffect(() => save("za_prompt_history", history), [history]);
 
-  function addToHistory(prompt, result) {
-    const entry = { id: Date.now(), prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""), result, time: new Date().toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" }), date: new Date().toLocaleDateString("fr-CA") };
-    setHistory(prev => [entry, ...prev].slice(0, 20));
+  async function fetchHistory() {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch("/api/history");
+      const data = await res.json();
+      setHistory(Array.isArray(data) ? data : []);
+    } catch {}
+    setHistoryLoading(false);
+  }
+
+  useEffect(() => { fetchHistory(); }, []);
+
+  async function addToHistory(prompt, result) {
+    const short = prompt.slice(0, 100) + (prompt.length > 100 ? "..." : "");
+    try {
+      await fetch("/api/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: short, result }),
+      });
+      fetchHistory();
+    } catch {}
   }
 
   return (
@@ -561,7 +591,7 @@ export default function Transformateur() {
         {tab === "summary" && <TabSummary />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
-        {tab === "history" && <TabHistory history={history} setHistory={setHistory} />}
+        {tab === "history" && <TabHistory history={history} loading={historyLoading} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}
       </div>
     </div>
   );

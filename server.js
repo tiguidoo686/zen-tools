@@ -1,8 +1,14 @@
+// Railway environment variables required:
+// - ANTHROPIC_API_KEY
+// - SUPABASE_URL
+// - SUPABASE_KEY (anon/public key)
+
 console.log("ENV CHECK:", process.env.PORT, process.env.ANTHROPIC_API_KEY ? "KEY OK" : "NO KEY");
 
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
+import { createClient } from "@supabase/supabase-js";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -11,6 +17,11 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 app.post("/api/claude", async (req, res) => {
   try {
@@ -39,6 +50,35 @@ app.post("/api/claude", async (req, res) => {
   } catch (err) {
     console.log("[claude] Unhandled error:", err);
     res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+app.post("/api/history", async (req, res) => {
+  try {
+    const { prompt, result } = req.body;
+    const { error } = await supabase
+      .from("zen_tools_history")
+      .insert({ prompt, result });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    console.log("[history] Save error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/history", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("zen_tools_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.log("[history] Fetch error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
