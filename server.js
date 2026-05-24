@@ -122,6 +122,100 @@ app.get("/api/history/test", async (req, res) => {
   res.json(results);
 });
 
+
+app.post("/api/sessions", async (req, res) => {
+  try {
+    const { objective } = req.body;
+    console.log("[sessions] Creating:", (objective || "").slice(0, 50));
+    const { data, error } = await supabase.from("zen_sessions").insert({ objective, status: "active" }).select().single();
+    console.log("[sessions] Response:", JSON.stringify({ data: data?.id, error }));
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[sessions] Create error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/sessions", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_sessions").select("*").order("created_at", { ascending: false }).limit(5);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { console.log("[sessions] Fetch error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/sessions/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_sessions").update(req.body).eq("id", req.params.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[sessions] Update error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/steps", async (req, res) => {
+  try {
+    const { session_id, text } = req.body;
+    const { data, error } = await supabase.from("zen_steps").insert({ session_id, text, completed: false }).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[steps] Create error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/steps/:sessionId", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_steps").select("*").eq("session_id", req.params.sessionId).order("created_at", { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { console.log("[steps] Fetch error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/steps/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_steps").update(req.body).eq("id", req.params.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[steps] Update error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/steps/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("zen_steps").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) { console.log("[steps] Delete error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/parking", async (req, res) => {
+  try {
+    const { session_id, content } = req.body;
+    const { data, error } = await supabase.from("zen_parking_lot").insert({ session_id, content }).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[parking] Create error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/parking/session/:sessionId", async (req, res) => {
+  try {
+    const { error } = await supabase.from("zen_parking_lot").delete().eq("session_id", req.params.sessionId);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) { console.log("[parking] Clear error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/parking/:sessionId", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_parking_lot").select("*").eq("session_id", req.params.sessionId).order("created_at", { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { console.log("[parking] Fetch error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/parking/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("zen_parking_lot").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) { console.log("[parking] Delete error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 app.use(express.static(join(__dirname, "dist")));
 app.get("/{*path}", (req, res) => {
   res.sendFile(join(__dirname, "dist", "index.html"));

@@ -78,6 +78,7 @@ const LIBRARY = [
 ];
 
 const TABS = [
+  { id: "ancre", icon: "🎯", label: "Ancre" },
   { id: "transform", icon: "✦", label: "Transformer" },
   { id: "analyze", icon: "🔍", label: "Analyser réponse" },
   { id: "improve", icon: "🔧", label: "Améliorer demande" },
@@ -525,8 +526,369 @@ function TabHistory({ history, loading, error, onClear }) {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────
+// SESSION BANNER — always visible across all tabs
+// ─────────────────────────────────────────────────────────
+function SessionBanner({ session, steps, onGoToAncre }) {
+  const completed = steps.filter(s => s.completed).length;
+  const total = steps.length;
+  return (
+    <div style={{ background: "#064e3b", borderBottom: "2px solid #059669", padding: "8px 1.5rem", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 14, flexShrink: 0 }}>🎯</span>
+      <span style={{ fontSize: 13, color: "#d1fae5", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {session.objective.length > 80 ? session.objective.slice(0, 80) + "…" : session.objective}
+      </span>
+      {total > 0 && (
+        <span style={{ fontSize: 12, color: "#6ee7b7", background: "rgba(6,78,59,0.8)", padding: "2px 10px", borderRadius: 20, border: "1px solid #059669", whiteSpace: "nowrap", flexShrink: 0 }}>
+          {completed}/{total} étapes
+        </span>
+      )}
+      <button onClick={onGoToAncre}
+        style={{ background: "#059669", color: "white", border: "none", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+        Voir l'ancre
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// SESSION HISTORY SECTION — shared by TabAncre
+// ─────────────────────────────────────────────────────────
+function SessionHistorySection({ history, expandedSummary, onExpand }) {
+  if (!history.length) return null;
+  return (
+    <div style={cs.card}>
+      <label style={cs.lbl}>🕐 SESSIONS PRÉCÉDENTES</label>
+      {history.map(s => {
+        const dateStr = new Date(s.started_at || s.created_at).toLocaleDateString("fr-CA");
+        const isExp = expandedSummary === s.id;
+        return (
+          <div key={s.id} style={{ borderBottom: "1px solid #f0eeff", padding: "10px 0" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: "#9e96c0" }}>{dateStr}</span>
+                  <span style={{ background: s.status === "completed" ? "#dcfce7" : "#fef9c3", color: s.status === "completed" ? "#15803d" : "#854d0e", borderRadius: 20, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>
+                    {s.status === "completed" ? "✓ Terminée" : "⏳ Active"}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: "#1a1528", lineHeight: 1.4 }}>
+                  {(s.objective || "").length > 80 ? s.objective.slice(0, 80) + "…" : s.objective}
+                </p>
+              </div>
+              {s.summary && (
+                <button onClick={() => onExpand(isExp ? null : s.id)} style={{ ...cs.btnSec, fontSize: 11, padding: "4px 10px", whiteSpace: "nowrap" }}>
+                  {isExp ? "Masquer" : "Voir résumé"}
+                </button>
+              )}
+            </div>
+            {isExp && s.summary && (
+              <div style={{ marginTop: 8, background: "#f5f4ff", borderRadius: 8, padding: "10px 12px" }}>
+                <pre style={{ ...cs.pre, fontSize: 12 }}>{s.summary}</pre>
+                <button onClick={() => navigator.clipboard.writeText(s.summary)} style={{ ...cs.btnSec, fontSize: 11, marginTop: 8 }}>📋 Copier</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// TAB ANCRE — FEATURE PRINCIPALE
+// ─────────────────────────────────────────────────────────
+function TabAncre({
+  session, steps, parkingLot, sessionHistory,
+  sessionLoading, sessionError,
+  onStartSession, onEndSession,
+  onAddStep, onToggleStep, onDeleteStep,
+  onAddToParkingLot, onDeleteParkingLotItem, onClearParkingLot,
+}) {
+  const [objective, setObjective] = useState("");
+  const [startLoading, setStartLoading] = useState(false);
+  const [startError, setStartError] = useState("");
+  const [newStep, setNewStep] = useState("");
+  const [stepLoading, setStepLoading] = useState(false);
+  const [distractText, setDistractText] = useState("");
+  const [distractCtx, setDistractCtx] = useState("");
+  const [distractResult, setDistractResult] = useState(null);
+  const [distractLoading, setDistractLoading] = useState(false);
+  const [distractError, setDistractError] = useState("");
+  const [expandedPark, setExpandedPark] = useState(null);
+  const [clearParkConfirm, setClearParkConfirm] = useState(false);
+  const [endConfirm, setEndConfirm] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryText, setSummaryText] = useState("");
+  const [summaryError, setSummaryError] = useState("");
+  const [expandedSummary, setExpandedSummary] = useState(null);
+
+  const completedCount = steps.filter(s => s.completed).length;
+  const pct = steps.length > 0 ? Math.round(completedCount / steps.length * 100) : 0;
+
+  async function handleStart() {
+    if (!objective.trim()) return;
+    setStartLoading(true); setStartError("");
+    try { await onStartSession(objective.trim()); }
+    catch (err) { setStartError((err.message || "Erreur.") + " — réessaye."); }
+    setStartLoading(false);
+  }
+
+  async function handleAddStep() {
+    const t = newStep.trim(); if (!t) return;
+    setStepLoading(true);
+    try { await onAddStep(t); setNewStep(""); } catch {}
+    setStepLoading(false);
+  }
+
+  async function handleCheckDistraction() {
+    if (!distractText.trim() || !session) return;
+    setDistractLoading(true); setDistractResult(null); setDistractError("");
+    try {
+      const obj = session.objective;
+      const sys = "Tu es un coach de focus pour quelqu'un avec TDAH qui développe une app. L'utilisateur a un objectif de session précis. Analyse si le nouveau message de Claude Code est directement lié à cet objectif ou une distraction.\n\nRéponds UNIQUEMENT dans ce format :\n\n🎯 LIÉ ou ⚠️ DISTRACTION\n\nPOURQUOI (1 phrase max, très directe)\n\nQUOI FAIRE :\n[Si LIÉ] : Maintenant ou Après l'objectif principal — explique en 1 phrase\n[Si DISTRACTION] : Copie ce message exact dans Claude Code :\n'---MESSAGE À COPIER---\nMerci, je note ça pour plus tard. Pour l'instant restons concentrés sur : " + obj + ". Peux-tu continuer avec ça ?\n---FIN DU MESSAGE---'\n\nSois ultra direct. Maximum 6 lignes au total.";
+      const content = "Objectif : " + obj + "\n\nMessage Claude Code :\n" + distractText + (distractCtx.trim() ? "\n\nContexte : " + distractCtx : "");
+      const r = await callAPI(sys, content);
+      setDistractResult(r);
+    } catch (err) { setDistractError((err.message || "Erreur.") + " — réessaye."); }
+    setDistractLoading(false);
+  }
+
+  function extractCopyMsg(text) {
+    const m = text.match(/---MESSAGE À COPIER---\n([\s\S]*?)---FIN DU MESSAGE---/);
+    return m ? m[1].trim() : null;
+  }
+
+  async function handleEndSession() {
+    setSummaryLoading(true); setSummaryError(""); setSummaryText("");
+    try {
+      const done = steps.filter(s => s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
+      const todo = steps.filter(s => !s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
+      const park = parkingLot.map(p => "- " + p.content).join("\n") || "Aucune";
+      const sys = "Tu résumes des sessions de travail avec Claude Code. Génère en français:\n📋 CE QUI A ÉTÉ ACCOMPLI\n❌ CE QUI RESTE À FAIRE\n🅿️ DISTRACTIONS NOTÉES (à traiter prochaine session)\n⏭️ PROCHAINE ÉTAPE PRIORITAIRE (1 action concrète)";
+      const content = "Objectif : " + session.objective + "\n\nÉtapes complétées :\n" + done + "\n\nÉtapes non complétées :\n" + todo + "\n\nParking lot :\n" + park;
+      const r = await callAPI(sys, content);
+      setSummaryText(r);
+      await onEndSession(r);
+    } catch (err) { setSummaryError((err.message || "Erreur.") + " — réessaye."); }
+    setSummaryLoading(false);
+  }
+
+  const isDistraction = distractResult && distractResult.includes("⚠️ DISTRACTION");
+  const copyMsg = distractResult ? extractCopyMsg(distractResult) : null;
+
+  // ── NO SESSION ──
+  if (!session) {
+    return (
+      <div>
+        <div style={cs.card}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 700, color: "#1a1528" }}>🎯 Ancre de session</h2>
+          <p style={{ ...cs.tip, marginBottom: 14 }}>Définis un objectif précis avant de commencer. Ça t'aide à rester concentré sur l'essentiel.</p>
+          <label style={cs.lbl}>MON OBJECTIF DE SESSION</label>
+          <textarea value={objective} onChange={e => setObjective(e.target.value)} rows={3}
+            placeholder="Qu'est-ce que tu veux accomplir aujourd'hui ? Ex: Ajouter l'écran de profil avec photo et nom modifiable"
+            style={cs.ta} onKeyDown={e => e.ctrlKey && e.key === "Enter" && handleStart()} />
+          {startError && (
+            <p style={{ color: "#ef4444", fontSize: 13, marginTop: 6 }}>
+              {startError} <button onClick={handleStart} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", fontSize: 13, textDecoration: "underline" }}>Réessayer</button>
+            </p>
+          )}
+          {sessionError && <p style={{ color: "#c97c2a", fontSize: 12, marginTop: 4 }}>⚠️ {sessionError}</p>}
+          <button onClick={handleStart} disabled={!objective.trim() || startLoading}
+            style={{ ...cs.btnMain(!objective.trim() || startLoading), marginTop: 12, width: "auto", padding: "11px 28px" }}>
+            {startLoading ? "Démarrage…" : "🚀 Démarrer la session"}
+          </button>
+        </div>
+        <SessionHistorySection history={sessionHistory} expandedSummary={expandedSummary} onExpand={setExpandedSummary} />
+      </div>
+    );
+  }
+
+  // ── ACTIVE SESSION ──
+  return (
+    <div>
+      {/* Objectif verrouillé + progression */}
+      <div style={{ ...cs.card, background: "#f0fdf4", border: "2px solid #86efac" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ ...cs.lbl, color: "#15803d" }}>🎯 OBJECTIF EN COURS</label>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#14532d", margin: 0, lineHeight: 1.5 }}>{session.objective}</p>
+          </div>
+          {!endConfirm && (
+            <button onClick={() => setEndConfirm(true)} style={{ ...cs.btnRed, whiteSpace: "nowrap" }}>Terminer la session</button>
+          )}
+        </div>
+        {steps.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: "#15803d" }}>{completedCount}/{steps.length} étapes complétées</span>
+              <span style={{ fontSize: 12, color: "#15803d" }}>{pct}%</span>
+            </div>
+            <div style={{ background: "#dcfce7", borderRadius: 99, height: 7 }}>
+              <div style={{ background: "#16a34a", borderRadius: 99, height: 7, width: pct + "%", transition: "width 0.4s ease" }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation fin de session */}
+      {endConfirm && (
+        <div style={{ ...cs.card, border: "2px solid #fca5a5", background: "#fff1f2" }}>
+          {summaryLoading ? (
+            <p style={{ color: "#7b6fa0", fontSize: 14 }}>⏳ Génération du résumé en cours…</p>
+          ) : summaryText ? (
+            <>
+              <label style={{ ...cs.lbl, color: "#dc2626" }}>📋 RÉSUMÉ DE SESSION</label>
+              <pre style={{ ...cs.pre, marginBottom: 10 }}>{summaryText}</pre>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => navigator.clipboard.writeText(summaryText)} style={cs.btnSec}>📋 Copier</button>
+                <button onClick={() => { setEndConfirm(false); setSummaryText(""); }} style={cs.btnSec}>Fermer</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 14, color: "#dc2626", fontWeight: 600, margin: "0 0 8px" }}>Terminer et résumer la session ?</p>
+              <p style={{ ...cs.tip, marginBottom: 10 }}>Un résumé sera généré avec tes étapes et le parking lot.</p>
+              {summaryError && (
+                <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>
+                  {summaryError} <button onClick={handleEndSession} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 13 }}>Réessayer</button>
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={handleEndSession} style={{ ...cs.btnMain(false), width: "auto", padding: "10px 22px", background: "#dc2626" }}>
+                  ✓ Terminer et résumer
+                </button>
+                <button onClick={() => { setEndConfirm(false); setSummaryError(""); }} style={cs.btnSec}>Annuler</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Étapes */}
+      <div style={cs.card}>
+        <label style={cs.lbl}>📋 ÉTAPES DE L'OBJECTIF</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <input value={newStep} onChange={e => setNewStep(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddStep()}
+            placeholder="Ajouter une étape… (Entrée pour valider)"
+            style={{ ...cs.ta, resize: "none", height: 38, padding: "8px 11px", flex: 1 }} />
+          <button onClick={handleAddStep} disabled={!newStep.trim() || stepLoading}
+            style={{ ...cs.btnMain(!newStep.trim() || stepLoading), width: 44, padding: 0, fontSize: 20, flexShrink: 0 }}>
+            {stepLoading ? "…" : "+"}
+          </button>
+        </div>
+        {steps.length === 0 && <p style={cs.tip}>Aucune étape — décompose ton objectif en sous-tâches pour suivre ta progression.</p>}
+        {steps.map(step => {
+          const lid = step._lid || step.id;
+          return (
+            <div key={lid} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid #f0eeff" }}>
+              <input type="checkbox" checked={!!step.completed} onChange={() => onToggleStep(lid)}
+                style={{ marginTop: 3, accentColor: "#534AB7", flexShrink: 0, width: 16, height: 16, cursor: "pointer" }} />
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 14, color: step.completed ? "#9e96c0" : "#1a1528", textDecoration: step.completed ? "line-through" : "none", lineHeight: 1.4 }}>{step.text}</p>
+                {step.completed && step.completed_at && (
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "#9e96c0" }}>
+                    ✓ {new Date(step.completed_at).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => onDeleteStep(lid)} style={{ ...cs.btnRed, padding: "3px 9px", fontSize: 12, flexShrink: 0 }}>✕</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Vérificateur de distraction */}
+      <div style={cs.card}>
+        <label style={cs.lbl}>🧠 VÉRIFICATEUR DE DISTRACTION</label>
+        <p style={cs.tip}>Colle ce que Claude Code vient de dire pour savoir si c'est lié à ton objectif.</p>
+        <textarea value={distractText} onChange={e => setDistractText(e.target.value)} rows={4}
+          placeholder="Colle ici ce que Claude Code vient de dire…"
+          style={{ ...cs.ta, marginBottom: 8 }} />
+        <textarea value={distractCtx} onChange={e => setDistractCtx(e.target.value)} rows={2}
+          placeholder="Contexte supplémentaire (optionnel)"
+          style={{ ...cs.ta, marginBottom: 10, fontSize: 12 }} />
+        {distractError && (
+          <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>
+            {distractError} <button onClick={handleCheckDistraction} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 13 }}>Réessayer</button>
+          </p>
+        )}
+        <button onClick={handleCheckDistraction} disabled={!distractText.trim() || distractLoading}
+          style={{ ...cs.btnMain(!distractText.trim() || distractLoading), width: "auto", padding: "10px 22px" }}>
+          {distractLoading ? "Analyse en cours…" : "🎯 Est-ce lié à mon objectif ?"}
+        </button>
+        {distractResult && (
+          <div style={{ marginTop: 12, background: isDistraction ? "#fff7ed" : "#f0fdf4", border: "1px solid " + (isDistraction ? "#fb923c" : "#86efac"), borderRadius: 10, padding: "12px 14px" }}>
+            <pre style={{ ...cs.pre, fontSize: 13 }}>{distractResult}</pre>
+            {(isDistraction || copyMsg) && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {isDistraction && copyMsg && (
+                  <button onClick={() => navigator.clipboard.writeText(copyMsg)} style={{ ...cs.btnSec, fontSize: 12 }}>📋 Copier le message</button>
+                )}
+                {isDistraction && (
+                  <button onClick={() => { onAddToParkingLot(distractText.slice(0, 300)); setDistractText(""); setDistractResult(null); }}
+                    style={{ ...cs.btnSec, fontSize: 12 }}>🅿️ Ajouter au parking lot</button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Parking lot */}
+      <div style={cs.card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <label style={{ ...cs.lbl, margin: 0 }}>
+            🅿️ PARKING LOT — À FAIRE PLUS TARD
+            {parkingLot.length > 0 && <span style={{ background: "#534AB7", color: "white", borderRadius: 99, fontSize: 10, padding: "1px 6px", marginLeft: 6 }}>{parkingLot.length}</span>}
+          </label>
+          {parkingLot.length > 0 && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => navigator.clipboard.writeText(parkingLot.map((p, i) => (i+1) + ". " + p.content).join("\n"))} style={{ ...cs.btnSec, fontSize: 11, padding: "5px 10px" }}>📋 Tout copier</button>
+              {clearParkConfirm ? (
+                <>
+                  <button onClick={() => { onClearParkingLot(); setClearParkConfirm(false); }} style={cs.btnRed}>Confirmer</button>
+                  <button onClick={() => setClearParkConfirm(false)} style={cs.btnSec}>Annuler</button>
+                </>
+              ) : (
+                <button onClick={() => setClearParkConfirm(true)} style={cs.btnRed}>🗑️ Vider</button>
+              )}
+            </div>
+          )}
+        </div>
+        {parkingLot.length === 0 && <p style={cs.tip}>Aucune distraction notée — le parking lot est vide.</p>}
+        {parkingLot.map(item => {
+          const lid = item._lid || item.id;
+          const time = new Date(item.created_at).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
+          const isExp = expandedPark === lid;
+          const preview = !isExp && item.content.length > 100 ? item.content.slice(0, 100) + "…" : item.content;
+          return (
+            <div key={lid} style={{ borderBottom: "1px solid #f0eeff", padding: "9px 0" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "#9e96c0", flexShrink: 0, marginTop: 2 }}>{time}</span>
+                <p style={{ margin: 0, fontSize: 13, color: "#1a1528", flex: 1, lineHeight: 1.4 }}>{preview}</p>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  {item.content.length > 100 && (
+                    <button onClick={() => setExpandedPark(isExp ? null : lid)} style={{ ...cs.btnSec, fontSize: 10, padding: "3px 7px" }}>{isExp ? "↑" : "↓"}</button>
+                  )}
+                  <button onClick={() => navigator.clipboard.writeText(item.content)} style={{ ...cs.btnSec, fontSize: 10, padding: "3px 7px" }}>📋</button>
+                  <button onClick={() => onDeleteParkingLotItem(lid)} style={{ ...cs.btnRed, fontSize: 10, padding: "3px 7px" }}>✕</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Historique */}
+      <SessionHistorySection history={sessionHistory} expandedSummary={expandedSummary} onExpand={setExpandedSummary} />
+    </div>
+  );
+}
+
 export default function Transformateur() {
-  const [tab, setTab] = useState("transform");
+  const [tab, setTab] = useState("ancre");
   const [showSettings, setShowSettings] = useState(false);
   const [lang, setLang] = useState(() => load("za_lang", "en"));
   const [master, setMaster] = useState(() => load("za_master", ""));
@@ -538,9 +900,20 @@ export default function Transformateur() {
   const [historyError, setHistoryError] = useState(null);
   const [transformInput, setTransformInput] = useState("");
 
+  // ── Ancre session state ──
+  const [session, setSession] = useState(() => { const s = load("za_session", null); return s && s.status === "active" ? s : null; });
+  const [steps, setSteps] = useState(() => load("za_steps", []));
+  const [parkingLot, setParkingLot] = useState(() => load("za_parking_lot", []));
+  const [sessionHistory, setSessionHistory] = useState([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionError, setSessionError] = useState(null);
+
   useEffect(() => save("za_lang", lang), [lang]);
   useEffect(() => save("za_project_mode", projectMode), [projectMode]);
   useEffect(() => save("za_project_desc", projectDesc), [projectDesc]);
+  useEffect(() => { save("za_session", session); }, [session]);
+  useEffect(() => { save("za_steps", steps); }, [steps]);
+  useEffect(() => { save("za_parking_lot", parkingLot); }, [parkingLot]);
 
   const projectCtx = projectMode === "zenalpha"
     ? "The user is building ZenAlpha, a React Native/Expo app designed for someone with ADHD."
@@ -565,6 +938,102 @@ export default function Transformateur() {
   }
 
   useEffect(() => { fetchHistory(); }, []);
+  useEffect(() => { initSessionHistory(); }, []);
+
+
+  async function initSessionHistory() {
+    try {
+      const res = await fetch("/api/sessions");
+      if (!res.ok) throw new Error("Erreur serveur " + res.status);
+      const data = await res.json();
+      setSessionHistory(Array.isArray(data) ? data : []);
+      const activeInDB = Array.isArray(data) ? data.find(s => s.status === "active") : null;
+      if (activeInDB && session && session.id === activeInDB.id) {
+        try {
+          const sr = await fetch("/api/steps/" + activeInDB.id);
+          if (sr.ok) { const sd = await sr.json(); if (Array.isArray(sd)) setSteps(sd.map(s => ({ ...s, _lid: s.id }))); }
+          const pr = await fetch("/api/parking/" + activeInDB.id);
+          if (pr.ok) { const pd = await pr.json(); if (Array.isArray(pd)) setParkingLot(pd.map(p => ({ ...p, _lid: p.id }))); }
+        } catch {}
+      }
+    } catch (err) { setSessionError(err.message); }
+  }
+
+  async function startSession(objective) {
+    setSessionLoading(true); setSessionError(null);
+    const local = { id: null, objective, started_at: new Date().toISOString(), status: "active" };
+    setSession(local);
+    try {
+      const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective }) });
+      if (!res.ok) throw new Error("Erreur serveur " + res.status);
+      const data = await res.json();
+      setSession(data);
+    } catch (err) { setSessionError("Supabase indisponible — session sauvegardée localement. " + err.message); }
+    setSessionLoading(false);
+  }
+
+  async function endSession(summary) {
+    const updates = { status: "completed", completed_at: new Date().toISOString(), summary };
+    const finished = session ? { ...session, ...updates } : null;
+    if (session?.id) {
+      try { await fetch("/api/sessions/" + session.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) }); } catch {}
+    }
+    if (finished) setSessionHistory(prev => [finished, ...prev.filter(s => s.id !== finished.id)].slice(0, 5));
+    setSession(null); setSteps([]); setParkingLot([]);
+    save("za_session", null); save("za_steps", []); save("za_parking_lot", []);
+  }
+
+  async function addStep(text) {
+    const lid = Date.now();
+    const s = { _lid: lid, id: null, session_id: session?.id, text, completed: false, completed_at: null, created_at: new Date().toISOString() };
+    setSteps(prev => [...prev, s]);
+    if (session?.id) {
+      try {
+        const res = await fetch("/api/steps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.id, text }) });
+        if (res.ok) { const d = await res.json(); setSteps(prev => prev.map(x => x._lid === lid ? { ...d, _lid: lid } : x)); }
+      } catch {}
+    }
+  }
+
+  async function toggleStep(lid) {
+    const step = steps.find(s => (s._lid || s.id) === lid);
+    if (!step) return;
+    const completed = !step.completed;
+    const completed_at = completed ? new Date().toISOString() : null;
+    setSteps(prev => prev.map(s => (s._lid || s.id) === lid ? { ...s, completed, completed_at } : s));
+    if (step.id) {
+      try { await fetch("/api/steps/" + step.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed, completed_at }) }); } catch {}
+    }
+  }
+
+  async function deleteStep(lid) {
+    const step = steps.find(s => (s._lid || s.id) === lid);
+    setSteps(prev => prev.filter(s => (s._lid || s.id) !== lid));
+    if (step?.id) { try { await fetch("/api/steps/" + step.id, { method: "DELETE" }); } catch {} }
+  }
+
+  async function addToParkingLot(content) {
+    const lid = Date.now();
+    const item = { _lid: lid, id: null, session_id: session?.id, content, created_at: new Date().toISOString() };
+    setParkingLot(prev => [...prev, item]);
+    if (session?.id) {
+      try {
+        const res = await fetch("/api/parking", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.id, content }) });
+        if (res.ok) { const d = await res.json(); setParkingLot(prev => prev.map(p => p._lid === lid ? { ...d, _lid: lid } : p)); }
+      } catch {}
+    }
+  }
+
+  async function deleteParkingLotItem(lid) {
+    const item = parkingLot.find(p => (p._lid || p.id) === lid);
+    setParkingLot(prev => prev.filter(p => (p._lid || p.id) !== lid));
+    if (item?.id) { try { await fetch("/api/parking/" + item.id, { method: "DELETE" }); } catch {} }
+  }
+
+  async function clearParkingLot() {
+    setParkingLot([]);
+    if (session?.id) { try { await fetch("/api/parking/session/" + session.id, { method: "DELETE" }); } catch {} }
+  }
 
   async function addToHistory(prompt, result) {
     const short = prompt.slice(0, 100) + (prompt.length > 100 ? "..." : "");
@@ -636,6 +1105,7 @@ export default function Transformateur() {
           </div>
         </div>
       )}
+      {session && <SessionBanner session={session} steps={steps} onGoToAncre={() => setTab("ancre")} />}
       <div style={{ background: "white", borderBottom: "1px solid #e2defc", overflowX: "auto" }}>
         <div style={{ display: "flex", padding: "0 1rem", minWidth: "max-content" }}>
           {TABS.map(t => (
@@ -650,6 +1120,7 @@ export default function Transformateur() {
         </div>
       </div>
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
+        {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onToggleStep={toggleStep} onDeleteStep={deleteStep} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
         {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} />}
