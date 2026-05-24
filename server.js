@@ -29,17 +29,22 @@ app.post("/api/claude", async (req, res) => {
   try {
     const { system, content } = req.body;
     const apiKey = process.env.ANTHROPIC_API_KEY;
+    const isMultipart = Array.isArray(content);
+    const hasPDF = isMultipart && content.some(b => b.type === "document");
     console.log("[claude] API key:", apiKey ? apiKey.slice(0, 10) + "..." : "MISSING");
+    console.log("[claude] Vision:", isMultipart, "PDF:", hasPDF);
     const requestBody = { model: "claude-sonnet-4-6", max_tokens: 6000, system, messages: [{ role: "user", content }] };
-    console.log("[claude] Request body:", JSON.stringify(requestBody, null, 2));
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+    if (hasPDF) headers["anthropic-beta"] = "pdfs-2024-09-25";
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers,
       body: JSON.stringify(requestBody),
     });
     const data = await response.json();

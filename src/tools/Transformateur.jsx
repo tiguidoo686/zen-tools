@@ -33,11 +33,17 @@ Reply ONLY with the prompt. No intro.`,
 
     explain: `Explain technical content in simple French to someone who knows nothing about code. Short points, zero jargon, max 2-3 lines per point. End with: "Est-ce que c'est bien ce que tu avais en tête ?"`,
 
-    analyze: `You verify if Claude Code did what was asked. Reply in French, 3 sections:
-✅ CE QUI A ÉTÉ FAIT
-⚠️ CE QUI SEMBLE MANQUER
-🔍 CE QUE TU DEVRAIS VÉRIFIER
-Direct, simple, max 4 points per section.`,
+    analyze: `Tu analyses si Claude Code a complété toutes les tâches demandées. Compare le prompt original avec la réponse reçue.
+
+Réponds UNIQUEMENT dans ce format JSON:
+{
+  "tasks": [
+    { "number": 1, "description": "description courte de la tâche", "done": true, "note": "ce qui a été fait ou ce qui manque en 1 ligne" }
+  ],
+  "summary": "résumé en 1 phrase"
+}
+
+Sois strict — une tâche est done:true SEULEMENT si la réponse confirme explicitement qu'elle a été faite.`,
 
     correction: (lang) => `Write a correction prompt for Claude Code in ${lang === "en" ? "English" : "French"}. Based on the analysis, list ONLY what needs to be fixed as numbered tasks. Be specific. Include validation steps. End with checklist. Reply ONLY with the prompt.`,
 
@@ -84,6 +90,7 @@ const TABS = [
   { id: "improve", icon: "🔧", label: "Améliorer demande" },
   { id: "debug", icon: "💬", label: "Déboguer convo" },
   { id: "error", icon: "⚠️", label: "Expliquer erreur" },
+  { id: "imageanalyze", icon: "📸", label: "Analyser" },
   { id: "summary", icon: "📋", label: "Résumé session" },
   { id: "library", icon: "📚", label: "Bibliothèque" },
   { id: "notes", icon: "📝", label: "Notes" },
@@ -230,64 +237,230 @@ function TabTransform({ lang, master, onAddHistory, SYS }) {
 }
 
 function TabAnalyze({ lang, onAddHistory, SYS }) {
-  const [origPrompt, setOrigPrompt] = useState("");
+  const [origPrompt, setOrigPrompt] = useState(() => load("za_analyze_orig", ""));
   const [response, setResponse] = useState("");
-  const [context, setContext] = useState("");
-  const analysis = useAPI();
+  const [tasks, setTasks] = useState(null);
+  const [summary, setSummary] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const correction = useAPI();
 
+  useEffect(() => { save("za_analyze_orig", origPrompt); }, [origPrompt]);
+
   async function analyze() {
-    const contextPart = context.trim() ? `\n\nContexte additionnel: ${context.trim()}` : "";
-    const content = origPrompt.trim()
-      ? `Demande originale:\n${origPrompt}\n\nRéponse de Claude Code:\n${response}${contextPart}`
-      : `Réponse de Claude Code:\n${response}${contextPart}`;
-    analysis.run(SYS.analyze, content, (r) => onAddHistory("🔍 Analyse: " + (origPrompt || response).slice(0, 80), r));
-    correction.setResult("");
+    if (!origPrompt.trim() || !response.trim()) return;
+    setLoading(true); setError(null); setTasks(null); setSummary("");
+    try {
+      const content = `Prompt original:\n${origPrompt}\n\nRéponse de Claude Code:\n${response}`;
+      const r = await callAPI(SYS.analyze, content);
+      let parsed;
+      try {
+        const clean = r.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        parsed = JSON.parse(clean);
+      } catch { throw new Error("La réponse n'était pas au format attendu. Réessaie."); }
+      setTasks(parsed.tasks || []);
+      setSummary(parsed.summary || "");
+      onAddHistory("🔍 Analyse: " + origPrompt.slice(0, 80), r);
+    } catch (e) { setError(e.message || "Erreur inattendue"); }
+    finally { setLoading(false); }
   }
+
+  const missingTasks = tasks ? tasks.filter(t => !t.done) : [];
 
   return (
     <div>
       <div style={{ ...cs.card, background: "#fff8e1", border: "1px solid #ffe082" }}>
-        <p style={{ fontSize: 13, color: "#f57f17", margin: 0 }}>📋 Colle la réponse de Claude Code. Je vérifie ce qui a été fait, ce qui manque, et je génère le prompt de correction.</p>
+        <p style={{ fontSize: 13, color: "#f57f17", margin: 0 }}>📋 Colle le prompt et la réponse — je vérifie tâche par tâche ce qui a été fait et ce qui manque.</p>
       </div>
       <div style={cs.card}>
-        <label style={cs.lbl}>TA DEMANDE ORIGINALE (recommandé)</label>
-        <textarea value={origPrompt} onChange={e => setOrigPrompt(e.target.value)} rows={3}
-          placeholder="Colle ici la demande que tu avais envoyée à Claude Code..." style={cs.ta} />
+        <label style={cs.lbl}>LE PROMPT ORIGINAL *</label>
+        <textarea value={origPrompt} onChange={e => setOrigPrompt(e.target.value)} rows={4}
+          placeholder="Colle ici la demande exacte que tu avais envoyée à Claude Code..." style={cs.ta} />
       </div>
       <div style={cs.card}>
         <label style={cs.lbl}>LA RÉPONSE DE CLAUDE CODE *</label>
         <textarea value={response} onChange={e => setResponse(e.target.value)} rows={6}
           placeholder="Colle ici ce que Claude Code t'a répondu..." style={cs.ta} />
       </div>
-      <ContextField value={context} onChange={setContext} />
-      <button onClick={analyze} disabled={analysis.loading || !response.trim()} style={cs.btnMain(analysis.loading || !response.trim())}>
-        {analysis.loading ? "⏳ Analyse..." : "🔍 Analyser la réponse"}
+      <button onClick={analyze} disabled={loading || !origPrompt.trim() || !response.trim()} style={cs.btnMain(loading || !origPrompt.trim() || !response.trim())}>
+        {loading ? "⏳ Analyse en cours..." : "🔍 Analyser la réponse"}
       </button>
-      <ErrBox msg={analysis.error} />
-      {analysis.result && (
-        <div>
-          <ResultBox label="🔍 ANALYSE" content={analysis.result} borderColor="#a5d6a7" bg="#f0fff8" labelColor="#1b5e20" />
-          <div style={{ ...cs.card, background: "#ede9ff", border: "1px solid #c5bff5" }}>
-            <p style={{ fontSize: 13, color: "#534AB7", margin: "0 0 10px" }}>Il manque des choses ? Génère le prompt de correction.</p>
-            <button onClick={() => {
-              const contextPart = context.trim() ? `\n\nUser context: ${context.trim()}` : "";
-              const content = `Original request:\n${origPrompt || "not provided"}\n\nClaude Code response:\n${response}\n\nAnalysis:\n${analysis.result}${contextPart}`;
-              correction.run(SYS.correction(lang), content, (r) => onAddHistory("🔧 Correction: " + (origPrompt || response).slice(0, 80), r));
-            }} disabled={correction.loading} style={cs.btnMain(correction.loading)}>
-              {correction.loading ? "⏳ Génération..." : "🔧 Générer le prompt de correction"}
-            </button>
-          </div>
-          <ErrBox msg={correction.error} />
-          {correction.result && (
-            <div style={{ ...cs.card, border: "2px solid #534AB7", marginTop: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={cs.lbl}>🔧 PROMPT DE CORRECTION</span>
-                <CopyBtn text={correction.result} />
+      {error && (
+        <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}>
+          <p style={{ fontSize: 13, color: "#c62828", margin: "0 0 8px" }}>❌ {error}</p>
+          <button onClick={analyze} style={cs.btnSec}>Réessayer</button>
+        </div>
+      )}
+      {tasks && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ ...cs.card, border: "1px solid #c5bff5", background: "#f5f4ff" }}>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#534AB7", letterSpacing: "0.05em" }}>
+                🔍 RÉSULTAT — {tasks.filter(t => t.done).length}/{tasks.length} tâches complétées
+              </span>
+            </div>
+            {tasks.map((t, i) => (
+              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderBottom: i < tasks.length - 1 ? "1px solid #e8e4ff" : "none" }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{t.done ? "✅" : "❌"}</span>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: t.done ? "#1b5e20" : "#c62828", margin: "0 0 2px" }}>{t.description}</p>
+                  {t.note && <p style={{ fontSize: 12, color: "#7b6fa0", margin: 0 }}>{t.note}</p>}
+                </div>
               </div>
-              <pre style={cs.pre}>{correction.result}</pre>
+            ))}
+            {summary && <p style={{ fontSize: 13, color: "#534AB7", margin: "12px 0 0", fontStyle: "italic" }}>{summary}</p>}
+          </div>
+          {missingTasks.length > 0 && (
+            <div style={{ ...cs.card, background: "#ede9ff", border: "1px solid #c5bff5" }}>
+              <p style={{ fontSize: 13, color: "#534AB7", margin: "0 0 10px" }}>
+                Il manque {missingTasks.length} tâche{missingTasks.length > 1 ? "s" : ""}. Génère le message de correction à envoyer à Claude Code.
+              </p>
+              <button onClick={() => {
+                const missing = missingTasks.map((t, i) => `${i + 1}. ${t.description}${t.note ? " — " + t.note : ""}`).join("\n");
+                const corrPrompt = `Ces tâches n'ont pas été complétées. Fais-les maintenant :\n\n${missing}\n\nContexte : ${origPrompt.slice(0, 200)}`;
+                correction.run(SYS.correction(lang), corrPrompt, (r) => onAddHistory("🔧 Correction: " + origPrompt.slice(0, 80), r));
+              }} disabled={correction.loading} style={cs.btnMain(correction.loading)}>
+                {correction.loading ? "⏳ Génération..." : "🔧 Demander ce qui manque"}
+              </button>
+              <ErrBox msg={correction.error} />
+              {correction.result && (
+                <div style={{ ...cs.card, border: "2px solid #534AB7", marginTop: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <span style={cs.lbl}>🔧 MESSAGE À COPIER</span>
+                    <CopyBtn text={correction.result} />
+                  </div>
+                  <pre style={cs.pre}>{correction.result}</pre>
+                </div>
+              )}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabImageAnalyze() {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [question, setQuestion] = useState("");
+  const [result, setResult] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [dragging, setDragging] = useState(false);
+
+  function handleFile(f) {
+    if (!f) return;
+    setFile(f); setResult(""); setError(null);
+    if (f.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = e => setPreview(e.target.result);
+      reader.readAsDataURL(f);
+    } else { setPreview(null); }
+  }
+
+  async function analyze() {
+    if (!file) return;
+    setLoading(true); setError(null); setResult("");
+    try {
+      const q = question.trim() || "Explique-moi ce que tu vois dans ce fichier. Qu'est-ce que ça signifie et que dois-je faire ?";
+      let content;
+      if (file.type.startsWith("image/")) {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => res(e.target.result.split(",")[1]);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+        content = [
+          { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
+          { type: "text", text: q }
+        ];
+      } else if (file.type === "application/pdf") {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => res(e.target.result.split(",")[1]);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+        content = [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "text", text: q }
+        ];
+      } else {
+        const text = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => res(e.target.result);
+          r.onerror = rej;
+          r.readAsText(file);
+        });
+        content = `${q}\n\nContenu du fichier "${file.name}":\n${text}`;
+      }
+      const resp = await fetch("/api/claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system: "Tu analyses des fichiers (images, captures d\'écran, documents) pour un entrepreneur non-technique. Explique en français simple : ce que tu vois, ce que ça signifie, et ce qu\'il doit faire. Sois direct et pratique.",
+          content
+        })
+      });
+      if (!resp.ok) { const d = await resp.json(); throw new Error(d.error || `Erreur ${resp.status}`); }
+      const d = await resp.json();
+      setResult(d.text);
+    } catch (e) { setError(e.message || "Erreur inattendue"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div>
+      <div style={{ ...cs.card, background: "#fff8e1", border: "1px solid #ffe082" }}>
+        <p style={{ fontSize: 13, color: "#f57f17", margin: 0 }}>📸 Uploade une image, capture d\'écran ou document — je t\'explique ce que ça contient en français simple.</p>
+      </div>
+      <div style={cs.card}>
+        <label style={cs.lbl}>FICHIER</label>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+          onClick={() => document.getElementById("img-file-input").click()}
+          style={{ border: `2px dashed ${dragging ? "#534AB7" : "#c5bff5"}`, borderRadius: 12, padding: "2rem 1rem", textAlign: "center", cursor: "pointer", background: dragging ? "#ede9ff" : "#faf9ff", transition: "all .15s" }}>
+          {file ? (
+            <div>
+              {preview && <img src={preview} alt="aperçu" style={{ maxHeight: 120, maxWidth: "100%", borderRadius: 8, marginBottom: 8 }} />}
+              <p style={{ fontSize: 13, color: "#534AB7", margin: 0 }}>{file.name} ({(file.size / 1024).toFixed(0)} Ko)</p>
+              <p style={{ fontSize: 11, color: "#9e96c0", margin: "4px 0 0" }}>Clique pour changer</p>
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize: 28, margin: "0 0 8px" }}>📎</p>
+              <p style={{ fontSize: 13, color: "#7b6fa0", margin: 0 }}>Glisse un fichier ici ou clique pour choisir</p>
+              <p style={{ fontSize: 11, color: "#9e96c0", margin: "4px 0 0" }}>JPG · PNG · WEBP · PDF · TXT</p>
+            </div>
+          )}
+        </div>
+        <input id="img-file-input" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,.txt,.md,.csv" onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} style={{ display: "none" }} />
+      </div>
+      <div style={cs.card}>
+        <label style={cs.lbl}>QU\'EST-CE QUE TU VEUX SAVOIR ? (optionnel)</label>
+        <textarea value={question} onChange={e => setQuestion(e.target.value)} rows={2}
+          placeholder="Ex: Qu\'est-ce que cette erreur veut dire ? Qu\'est-ce que je dois changer ?" style={cs.ta} />
+      </div>
+      <button onClick={analyze} disabled={loading || !file} style={cs.btnMain(loading || !file)}>
+        {loading ? "⏳ Analyse en cours..." : "📸 Analyser"}
+      </button>
+      {error && (
+        <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}>
+          <p style={{ fontSize: 13, color: "#c62828", margin: "0 0 8px" }}>❌ {error}</p>
+          <button onClick={analyze} style={cs.btnSec}>Réessayer</button>
+        </div>
+      )}
+      {result && (
+        <div style={{ ...cs.card, border: "1px solid #a5d6a7", background: "#f0fff8", marginTop: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#1b5e20", letterSpacing: "0.05em" }}>📸 ANALYSE</span>
+            <CopyBtn text={result} />
+          </div>
+          <pre style={cs.pre}>{result}</pre>
         </div>
       )}
     </div>
@@ -1126,6 +1299,7 @@ export default function Transformateur() {
         {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "imageanalyze" && <TabImageAnalyze />}
         {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
