@@ -446,7 +446,7 @@ function TabNotes() {
   );
 }
 
-function TabHistory({ history, loading, onClear }) {
+function TabHistory({ history, loading, error, onClear }) {
   function exportHistory() {
     const text = history.map(h => {
       const d = new Date(h.created_at);
@@ -459,7 +459,19 @@ function TabHistory({ history, loading, onClear }) {
     const a = document.createElement("a"); a.href = url; a.download = "historique-prompts-zenalpha.txt"; a.click();
     URL.revokeObjectURL(url);
   }
-  if (loading) return <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}><p style={{ color: "#7b6fa0" }}>Chargement...</p></div>;
+  if (loading) return (
+    <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}>
+      <p style={{ fontSize: 24, marginBottom: 8 }}>⏳</p>
+      <p style={{ color: "#7b6fa0", fontSize: 14 }}>Chargement de l'historique...</p>
+    </div>
+  );
+  if (error) return (
+    <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem", borderLeft: "3px solid #e05a5a" }}>
+      <p style={{ fontSize: 24, marginBottom: 8 }}>⚠️</p>
+      <p style={{ color: "#c0392b", fontSize: 14, marginBottom: 4 }}>Impossible de charger l'historique.</p>
+      <p style={{ color: "#9e96c0", fontSize: 12 }}>{error}</p>
+    </div>
+  );
   return (
     <div>
       {history.length > 0 && (
@@ -501,6 +513,7 @@ export default function Transformateur() {
   const [projectDesc, setProjectDesc] = useState(() => load("za_project_desc", ""));
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
   const [transformInput, setTransformInput] = useState("");
 
   useEffect(() => save("za_lang", lang), [lang]);
@@ -517,11 +530,15 @@ export default function Transformateur() {
 
   async function fetchHistory() {
     setHistoryLoading(true);
+    setHistoryError(null);
     try {
       const res = await fetch("/api/history");
+      if (!res.ok) throw new Error(`Erreur serveur ${res.status}`);
       const data = await res.json();
       setHistory(Array.isArray(data) ? data : []);
-    } catch {}
+    } catch (err) {
+      setHistoryError(err.message || "Erreur réseau. Vérifiez votre connexion.");
+    }
     setHistoryLoading(false);
   }
 
@@ -619,7 +636,7 @@ export default function Transformateur() {
         {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
-        {tab === "history" && <TabHistory history={history} loading={historyLoading} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}
+        {tab === "history" && <TabHistory history={history} loading={historyLoading} error={historyError} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}
       </div>
     </div>
   );
