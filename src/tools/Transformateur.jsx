@@ -19,9 +19,10 @@ async function callAPI(system, content) {
   return data.text;
 }
 
-const SYS = {
-  transform: (master, lang, complexity) =>
-    `You are an expert at writing prompts for developers. The user is building ZenAlpha, a React Native/Expo app with an AI named Lia, designed for someone with ADHD.${master ? `\n\nProject context:\n${master}` : ""}
+function buildSYS(projectCtx) {
+  return {
+    transform: (master, lang, complexity) =>
+      `You are an expert at writing prompts for developers. ${projectCtx}${master ? `\n\nProject context:\n${master}` : ""}
 Complexity: ${complexity === "small" ? "Small (1-2 files)" : complexity === "medium" ? "Medium (multiple files)" : "Large (architecture change)"}.
 Write a structured prompt in ${lang === "en" ? "English" : "French"}:
 - Numbered tasks
@@ -30,46 +31,45 @@ Write a structured prompt in ${lang === "en" ? "English" : "French"}:
 - End with checklist
 Reply ONLY with the prompt. No intro.`,
 
-  explain: `Explain technical content in simple French to someone who knows nothing about code. Short points, zero jargon, max 2-3 lines per point. End with: "Est-ce que c'est bien ce que tu avais en tête ?"`,
+    explain: `Explain technical content in simple French to someone who knows nothing about code. Short points, zero jargon, max 2-3 lines per point. End with: "Est-ce que c'est bien ce que tu avais en tête ?"`,
 
-  analyze: `You verify if Claude Code did what was asked. Reply in French, 3 sections:
+    analyze: `You verify if Claude Code did what was asked. Reply in French, 3 sections:
 ✅ CE QUI A ÉTÉ FAIT
 ⚠️ CE QUI SEMBLE MANQUER
 🔍 CE QUE TU DEVRAIS VÉRIFIER
 Direct, simple, max 4 points per section.`,
 
-  correction: (lang) => `Write a correction prompt for Claude Code in ${lang === "en" ? "English" : "French"}. Based on the analysis, list ONLY what needs to be fixed as numbered tasks. Be specific. Include validation steps. End with checklist. Reply ONLY with the prompt.`,
+    correction: (lang) => `Write a correction prompt for Claude Code in ${lang === "en" ? "English" : "French"}. Based on the analysis, list ONLY what needs to be fixed as numbered tasks. Be specific. Include validation steps. End with checklist. Reply ONLY with the prompt.`,
 
-  improve: `Tu corriges des demandes qui n'ont pas bien fonctionné avec Claude Code. Réponds en français:
+    improve: `Tu corriges des demandes qui n'ont pas bien fonctionné avec Claude Code. Réponds en français:
 1. POURQUOI ÇA N'A PAS MARCHÉ (2-3 raisons simples)
 2. VERSION AMÉLIORÉE (prompt corrigé, numéroté, prêt à utiliser)`,
 
-  urgent: `Fix urgent ZenAlpha (React Native/Expo) problems fast. Give minimum viable Claude Code prompt to unblock. Be concise, direct, actionable.`,
-
-  explainError: `Tu expliques des erreurs techniques en français simple.
+    explainError: `Tu expliques des erreurs techniques en français simple.
 1. CE QUE ÇA VEUT DIRE (2-3 lignes simples)
 2. POURQUOI ÇA ARRIVE
 3. QUOI DIRE À CLAUDE CODE (prompt exact à copier-coller)`,
 
-  debugConvo: `You are an expert at analyzing problematic conversations between a user and Claude Code (the AI coding tool). The user is building ZenAlpha, a React Native/Expo app.
+    debugConvo: `You are an expert at analyzing problematic conversations between a user and Claude Code (the AI coding tool). ${projectCtx}
 
 When the user pastes a conversation that went wrong, you must:
 1. IDENTIFY WHAT WENT WRONG — why did Claude Code misunderstand or do the wrong thing
 2. EXPLAIN WHY in simple French (2-3 lines max)
 3. GIVE THE EXACT MESSAGE TO SEND TO CLAUDE CODE — a ready-to-copy prompt in English that will fix the situation without starting over
 
-IMPORTANT: Your response is always about fixing the CODE in ZenAlpha using Claude Code. Never give advice about what to say to Lia or ZenAlpha the app. Always end with a ready-to-copy Claude Code prompt.`,
+IMPORTANT: Your response is always about fixing the CODE using Claude Code. Always end with a ready-to-copy Claude Code prompt.`,
 
-  sessionSummary: `Tu résumes des sessions de travail avec Claude Code. Génère en français:
+    sessionSummary: `Tu résumes des sessions de travail avec Claude Code. Génère en français:
 📋 CE QUI A ÉTÉ ACCOMPLI
 🔄 CE QUI EST EN COURS
 ⏭️ PROCHAINES ÉTAPES SUGGÉRÉES (2-3 actions concrètes)`,
-};
+  };
+}
 
 const LIBRARY = [
   { label: "Nouvel écran", icon: "📱", prompt: "Add a new screen called [NAME] to ZenAlpha. Include: navigation setup, basic layout with header, empty state, and connect it to the existing navigation structure." },
   { label: "Corriger un bug", icon: "🐛", prompt: "Fix this bug in ZenAlpha: [DESCRIBE THE BUG]. Find the root cause, fix it without breaking existing functionality, and add a check to prevent it from happening again." },
-  { label: "Fonctionnalité Lia", icon: "🤖", prompt: "Add this capability to Lia (the AI in ZenAlpha): [DESCRIBE CAPABILITY]. Update the AI system prompt, add UI feedback, handle errors gracefully, and test with edge cases." },
+  { label: "Fonctionnalité IA", icon: "🤖", prompt: "Add this capability to the AI assistant in ZenAlpha: [DESCRIBE CAPABILITY]. Update the AI system prompt, add UI feedback, handle errors gracefully, and test with edge cases." },
   { label: "Composant UI", icon: "🎨", prompt: "Create a reusable UI component for ZenAlpha: [DESCRIBE COMPONENT]. Match the existing design system, make it typed with TypeScript, handle loading/error/empty states." },
   { label: "Sauvegarder données", icon: "💾", prompt: "Add data persistence for [DATA TYPE] in ZenAlpha. Use the existing storage solution, handle errors, add loading states, and ensure data survives app restart." },
   { label: "Optimiser perf", icon: "⚡", prompt: "Optimize the performance of [SCREEN/FEATURE] in ZenAlpha. Identify bottlenecks, reduce unnecessary re-renders, optimize lists if any." },
@@ -159,7 +159,7 @@ function useAPI() {
   return { result, setResult, loading, error, run };
 }
 
-function TabTransform({ lang, master, onAddHistory }) {
+function TabTransform({ lang, master, onAddHistory, SYS }) {
   const [input, setInput] = useState("");
   const [section, setSection] = useState("");
   const [context, setContext] = useState("");
@@ -170,7 +170,7 @@ function TabTransform({ lang, master, onAddHistory }) {
   async function transform() {
     const contextPart = context.trim() ? `\n\nAdditional context from user: ${context.trim()}` : "";
     const content = section.trim() ? `Section/file: ${section.trim()}\n\nIdea: ${input.trim()}${contextPart}` : `${input.trim()}${contextPart}`;
-    prompt.run(SYS.transform(master, lang, complexity), content, (r) => onAddHistory(input, r));
+    prompt.run(SYS.transform(master, lang, complexity), content, (r) => onAddHistory("✦ Transformer: " + input.slice(0, 80), r));
     explain.setResult("");
   }
 
@@ -228,7 +228,7 @@ function TabTransform({ lang, master, onAddHistory }) {
   );
 }
 
-function TabAnalyze({ lang }) {
+function TabAnalyze({ lang, onAddHistory, SYS }) {
   const [origPrompt, setOrigPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [context, setContext] = useState("");
@@ -240,7 +240,7 @@ function TabAnalyze({ lang }) {
     const content = origPrompt.trim()
       ? `Demande originale:\n${origPrompt}\n\nRéponse de Claude Code:\n${response}${contextPart}`
       : `Réponse de Claude Code:\n${response}${contextPart}`;
-    analysis.run(SYS.analyze, content);
+    analysis.run(SYS.analyze, content, (r) => onAddHistory("🔍 Analyse: " + (origPrompt || response).slice(0, 80), r));
     correction.setResult("");
   }
 
@@ -272,7 +272,7 @@ function TabAnalyze({ lang }) {
             <button onClick={() => {
               const contextPart = context.trim() ? `\n\nUser context: ${context.trim()}` : "";
               const content = `Original request:\n${origPrompt || "not provided"}\n\nClaude Code response:\n${response}\n\nAnalysis:\n${analysis.result}${contextPart}`;
-              correction.run(SYS.correction(lang), content);
+              correction.run(SYS.correction(lang), content, (r) => onAddHistory("🔧 Correction: " + (origPrompt || response).slice(0, 80), r));
             }} disabled={correction.loading} style={cs.btnMain(correction.loading)}>
               {correction.loading ? "⏳ Génération..." : "🔧 Générer le prompt de correction"}
             </button>
@@ -293,7 +293,7 @@ function TabAnalyze({ lang }) {
   );
 }
 
-function TabImprove() {
+function TabImprove({ onAddHistory, SYS }) {
   const [bad, setBad] = useState("");
   const [context, setContext] = useState("");
   const improve = useAPI();
@@ -308,7 +308,7 @@ function TabImprove() {
           placeholder="Colle ici la demande qui n'a pas donné le bon résultat..." style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => improve.run(SYS.improve, context.trim() ? `${bad}\n\nContexte: ${context}` : bad)} disabled={improve.loading || !bad.trim()} style={cs.btnMain(improve.loading || !bad.trim())}>
+      <button onClick={() => improve.run(SYS.improve, context.trim() ? `${bad}\n\nContexte: ${context}` : bad, (r) => onAddHistory("🔧 Amélioration: " + bad.slice(0, 80), r))} disabled={improve.loading || !bad.trim()} style={cs.btnMain(improve.loading || !bad.trim())}>
         {improve.loading ? "⏳ Analyse..." : "🔧 Améliorer ma demande"}
       </button>
       <ErrBox msg={improve.error} />
@@ -317,7 +317,7 @@ function TabImprove() {
   );
 }
 
-function TabDebug() {
+function TabDebug({ onAddHistory, SYS }) {
   const [convo, setConvo] = useState("");
   const [context, setContext] = useState("");
   const debug = useAPI();
@@ -332,7 +332,7 @@ function TabDebug() {
           placeholder={"Moi : Ajoute un bouton rouge\nClaude : J'ai ajouté un bouton bleu...\nMoi : Non c'est pas ça\nClaude : ..."} style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => debug.run(SYS.debugConvo, context.trim() ? `${convo}\n\nContexte additionnel: ${context}` : convo)} disabled={debug.loading || !convo.trim()} style={cs.btnMain(debug.loading || !convo.trim())}>
+      <button onClick={() => debug.run(SYS.debugConvo, context.trim() ? `${convo}\n\nContexte additionnel: ${context}` : convo, (r) => onAddHistory("💬 Debug: " + convo.slice(0, 80), r))} disabled={debug.loading || !convo.trim()} style={cs.btnMain(debug.loading || !convo.trim())}>
         {debug.loading ? "⏳ Analyse..." : "💬 Déboguer cette conversation"}
       </button>
       <ErrBox msg={debug.error} />
@@ -349,7 +349,7 @@ function TabDebug() {
   );
 }
 
-function TabError() {
+function TabError({ onAddHistory, SYS }) {
   const [error, setError] = useState("");
   const [context, setContext] = useState("");
   const explain = useAPI();
@@ -364,7 +364,7 @@ function TabError() {
           placeholder={"TypeError: Cannot read properties of undefined...\nau fichier TaskList.tsx:42..."} style={{ ...cs.ta, fontFamily: "monospace", fontSize: 13 }} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => explain.run(SYS.explainError, context.trim() ? `${error}\n\nContexte: ${context}` : error)} disabled={explain.loading || !error.trim()} style={cs.btnMain(explain.loading || !error.trim())}>
+      <button onClick={() => explain.run(SYS.explainError, context.trim() ? `${error}\n\nContexte: ${context}` : error, (r) => onAddHistory("⚠️ Erreur: " + error.slice(0, 80), r))} disabled={explain.loading || !error.trim()} style={cs.btnMain(explain.loading || !error.trim())}>
         {explain.loading ? "⏳ Analyse..." : "⚠️ Expliquer cette erreur"}
       </button>
       <ErrBox msg={explain.error} />
@@ -381,7 +381,7 @@ function TabError() {
   );
 }
 
-function TabSummary() {
+function TabSummary({ onAddHistory, SYS }) {
   const [session, setSession] = useState("");
   const [context, setContext] = useState("");
   const summary = useAPI();
@@ -396,7 +396,7 @@ function TabSummary() {
           placeholder="Colle ici les messages importants de ta session Claude Code..." style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => summary.run(SYS.sessionSummary, context.trim() ? `${session}\n\nContexte: ${context}` : session)} disabled={summary.loading || !session.trim()} style={cs.btnMain(summary.loading || !session.trim())}>
+      <button onClick={() => summary.run(SYS.sessionSummary, context.trim() ? `${session}\n\nContexte: ${context}` : session, (r) => onAddHistory("📋 Résumé de session", r))} disabled={summary.loading || !session.trim()} style={cs.btnMain(summary.loading || !session.trim())}>
         {summary.loading ? "⏳ Résumé..." : "📋 Générer le résumé"}
       </button>
       <ErrBox msg={summary.error} />
@@ -432,7 +432,6 @@ function TabLibrary({ onUse }) {
 
 function TabNotes() {
   const [notes, setNotes] = useState(() => load("za_notes", ""));
-  const [saved, setSaved] = useState(false);
   useEffect(() => { save("za_notes", notes); }, [notes]);
   return (
     <div>
@@ -498,11 +497,23 @@ export default function Transformateur() {
   const [lang, setLang] = useState(() => load("za_lang", "en"));
   const [master, setMaster] = useState(() => load("za_master", ""));
   const [showMaster, setShowMaster] = useState(false);
+  const [projectMode, setProjectMode] = useState(() => load("za_project_mode", "zenalpha"));
+  const [projectDesc, setProjectDesc] = useState(() => load("za_project_desc", ""));
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [transformInput, setTransformInput] = useState("");
 
   useEffect(() => save("za_lang", lang), [lang]);
+  useEffect(() => save("za_project_mode", projectMode), [projectMode]);
+  useEffect(() => save("za_project_desc", projectDesc), [projectDesc]);
+
+  const projectCtx = projectMode === "zenalpha"
+    ? "The user is building ZenAlpha, a React Native/Expo app designed for someone with ADHD."
+    : projectDesc.trim()
+      ? `The user is working on this project: ${projectDesc.trim()}`
+      : "The user is a software developer.";
+
+  const SYS = buildSYS(projectCtx);
 
   async function fetchHistory() {
     setHistoryLoading(true);
@@ -533,7 +544,7 @@ export default function Transformateur() {
     <div style={{ minHeight: "100vh", background: "#f5f4ff", fontFamily: "system-ui,sans-serif" }}>
       <div style={{ background: "#534AB7", padding: "0.75rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <p style={{ fontSize: 13, color: "#c4b5fd", margin: 0 }}>
-          {master ? "✓ MASTER.md configuré" : "⚠️ MASTER.md non configuré"} · {lang === "en" ? "English" : "Français"}
+          {projectMode === "zenalpha" ? "🏗️ ZenAlpha" : "🌐 Autre projet"} · {master ? "✓ MASTER.md" : "⚠️ sans MASTER.md"} · {lang === "en" ? "English" : "Français"}
         </p>
         <button onClick={() => setShowSettings(!showSettings)}
           style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", borderRadius: 8, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
@@ -542,7 +553,23 @@ export default function Transformateur() {
       </div>
       {showSettings && (
         <div style={{ background: "#ede9ff", borderBottom: "1px solid #c5bff5", padding: "1rem 1.5rem" }}>
-          <div style={{ maxWidth: 780, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ maxWidth: 780, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <label style={cs.lbl}>MODE DE PROJET</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: projectMode === "generic" ? 8 : 0 }}>
+                {[["zenalpha", "🏗️ ZenAlpha"], ["generic", "🌐 Autre projet"]].map(([m, lbl]) => (
+                  <button key={m} onClick={() => setProjectMode(m)}
+                    style={{ background: projectMode === m ? "#534AB7" : "transparent", color: projectMode === m ? "white" : "#534AB7", border: "1px solid #c5bff5", borderRadius: 7, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              {projectMode === "generic" && (
+                <textarea value={projectDesc} onChange={e => setProjectDesc(e.target.value)}
+                  rows={2} placeholder="Décris ton projet... Ex: App iOS de gestion de finances personnelles en Swift"
+                  style={cs.ta} />
+              )}
+            </div>
             <div>
               <label style={cs.lbl}>LANGUE</label>
               <div style={{ display: "flex", gap: 8 }}>
@@ -584,12 +611,12 @@ export default function Transformateur() {
         </div>
       </div>
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} />}
-        {tab === "analyze" && <TabAnalyze lang={lang} />}
-        {tab === "improve" && <TabImprove />}
-        {tab === "debug" && <TabDebug />}
-        {tab === "error" && <TabError />}
-        {tab === "summary" && <TabSummary />}
+        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
         {tab === "history" && <TabHistory history={history} loading={historyLoading} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}
