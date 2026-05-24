@@ -447,6 +447,23 @@ function TabNotes() {
 }
 
 function TabHistory({ history, loading, error, onClear }) {
+  const debugUrl = window.location.origin + "/api/history";
+  const standalone = typeof window.navigator.standalone !== "undefined"
+    ? String(window.navigator.standalone)
+    : typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches
+      ? "true (matchMedia)"
+      : "false";
+  const fetchStatus = loading ? "loading..." : error ? "error" : "success";
+  const debugPanel = (
+    <div style={{ background: "#1a1528", color: "#a0e0a0", fontFamily: "monospace", fontSize: 11, borderRadius: 8, padding: "10px 14px", marginBottom: 14, lineHeight: 1.7 }}>
+      <div style={{ color: "#fff", fontWeight: 700, marginBottom: 4 }}>🔬 DEBUG — Historique</div>
+      <div><span style={{ color: "#9e96c0" }}>URL:</span> {debugUrl}</div>
+      <div><span style={{ color: "#9e96c0" }}>Status:</span> <span style={{ color: fetchStatus === "error" ? "#ff7070" : fetchStatus === "success" ? "#a0e0a0" : "#ffe080" }}>{fetchStatus}</span></div>
+      <div><span style={{ color: "#9e96c0" }}>Erreur:</span> {error || "—"}</div>
+      <div><span style={{ color: "#9e96c0" }}>Entrées:</span> {history.length}</div>
+      <div><span style={{ color: "#9e96c0" }}>standalone:</span> {standalone}</div>
+    </div>
+  );
   function exportHistory() {
     const text = history.map(h => {
       const d = new Date(h.created_at);
@@ -459,46 +476,51 @@ function TabHistory({ history, loading, error, onClear }) {
     const a = document.createElement("a"); a.href = url; a.download = "historique-prompts-zenalpha.txt"; a.click();
     URL.revokeObjectURL(url);
   }
-  if (loading) return (
-    <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}>
-      <p style={{ fontSize: 24, marginBottom: 8 }}>⏳</p>
-      <p style={{ color: "#7b6fa0", fontSize: 14 }}>Chargement de l'historique...</p>
-    </div>
-  );
-  if (error) return (
-    <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem", borderLeft: "3px solid #e05a5a" }}>
-      <p style={{ fontSize: 24, marginBottom: 8 }}>⚠️</p>
-      <p style={{ color: "#c0392b", fontSize: 14, marginBottom: 4 }}>Impossible de charger l'historique.</p>
-      <p style={{ color: "#9e96c0", fontSize: 12 }}>{error}</p>
-    </div>
-  );
   return (
     <div>
-      {history.length > 0 && (
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
-          <button onClick={exportHistory} style={{ ...cs.btnSec, fontSize: 12, padding: "6px 14px" }}>📥 Exporter (.txt)</button>
-          <button onClick={onClear} style={cs.btnRed}>🗑️ Effacer</button>
+      {debugPanel}
+      {loading && (
+        <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}>
+          <p style={{ fontSize: 24, marginBottom: 8 }}>⏳</p>
+          <p style={{ color: "#7b6fa0", fontSize: 14 }}>Chargement de l'historique...</p>
         </div>
       )}
-      {history.length === 0 ? (
-        <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}>
-          <p style={{ fontSize: 24, marginBottom: 8 }}>🕐</p>
-          <p style={{ fontSize: 14, color: "#7b6fa0" }}>Aucun historique. Transforme une demande pour commencer.</p>
+      {error && !loading && (
+        <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem", borderLeft: "3px solid #e05a5a" }}>
+          <p style={{ fontSize: 24, marginBottom: 8 }}>⚠️</p>
+          <p style={{ color: "#c0392b", fontSize: 14, marginBottom: 4 }}>Impossible de charger l'historique.</p>
+          <p style={{ color: "#9e96c0", fontSize: 12 }}>{error}</p>
         </div>
-      ) : history.map(h => {
-        const d = new Date(h.created_at);
-        const date = d.toLocaleDateString("fr-CA");
-        const time = d.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
-        return (
-          <div key={h.id} style={cs.card}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: "#9e96c0" }}>🕐 {time} — {date}</span>
-              <CopyBtn text={h.result} label="Copier le prompt" />
+      )}
+      {!loading && !error && (
+        <div>
+          {history.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
+              <button onClick={exportHistory} style={{ ...cs.btnSec, fontSize: 12, padding: "6px 14px" }}>📥 Exporter (.txt)</button>
+              <button onClick={onClear} style={cs.btnRed}>🗑️ Effacer</button>
             </div>
-            <p style={{ fontSize: 14, color: "#1a1528", margin: 0 }}>📝 {h.prompt}</p>
-          </div>
-        );
-      })}
+          )}
+          {history.length === 0 ? (
+            <div style={{ ...cs.card, textAlign: "center", padding: "2.5rem" }}>
+              <p style={{ fontSize: 24, marginBottom: 8 }}>🕐</p>
+              <p style={{ fontSize: 14, color: "#7b6fa0" }}>Aucun historique. Transforme une demande pour commencer.</p>
+            </div>
+          ) : history.map(h => {
+            const d = new Date(h.created_at);
+            const date = d.toLocaleDateString("fr-CA");
+            const time = d.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
+            return (
+              <div key={h.id} style={cs.card}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, color: "#9e96c0" }}>🕐 {time} — {date}</span>
+                  <CopyBtn text={h.result} label="Copier le prompt" />
+                </div>
+                <p style={{ fontSize: 14, color: "#1a1528", margin: 0 }}>📝 {h.prompt}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
