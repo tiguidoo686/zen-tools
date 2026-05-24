@@ -4,6 +4,8 @@
 // - SUPABASE_KEY (anon/public key)
 
 console.log("ENV CHECK:", process.env.PORT, process.env.ANTHROPIC_API_KEY ? "KEY OK" : "NO KEY");
+console.log("Supabase URL:", process.env.SUPABASE_URL ? "OK" : "MISSING");
+console.log("Supabase KEY:", process.env.SUPABASE_KEY ? "OK" : "MISSING");
 
 import express from "express";
 import cors from "cors";
@@ -56,13 +58,20 @@ app.post("/api/claude", async (req, res) => {
 app.post("/api/history", async (req, res) => {
   try {
     const { prompt, result } = req.body;
-    const { error } = await supabase
+    console.log("[history] Saving to Supabase:", { promptLen: (prompt || "").length, resultLen: (result || "").length });
+    const response = await supabase
       .from("zen_tools_history")
       .insert({ prompt, result });
-    if (error) throw error;
+    console.log("[history] Supabase response:", JSON.stringify(response));
+    const { error } = response;
+    if (error) {
+      console.log("[history] Save failed:", error.message, error.code, error.details);
+      throw error;
+    }
+    console.log("[history] Saved successfully.");
     res.json({ ok: true });
   } catch (err) {
-    console.log("[history] Save error:", err);
+    console.log("[history] Save error (catch):", err.message || err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -74,10 +83,11 @@ app.get("/api/history", async (req, res) => {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(20);
+    console.log("[history] Fetch rows:", data ? data.length : 0, error ? "error:" + error.message : "no error");
     if (error) throw error;
     res.json(data);
   } catch (err) {
-    console.log("[history] Fetch error:", err);
+    console.log("[history] Fetch error:", err.message || err);
     res.status(500).json({ error: err.message });
   }
 });
