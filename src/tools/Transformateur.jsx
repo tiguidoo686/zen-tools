@@ -518,13 +518,14 @@ export default function Transformateur() {
 
   async function addToHistory(prompt, result) {
     const short = prompt.slice(0, 100) + (prompt.length > 100 ? "..." : "");
+    const newEntry = { id: Date.now(), prompt: short, result, created_at: new Date().toISOString() };
+    setHistory(prev => [newEntry, ...prev].slice(0, 20));
     try {
       await fetch("/api/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: short, result }),
       });
-      fetchHistory();
     } catch {}
   }
 
