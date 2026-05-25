@@ -253,37 +253,15 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) 
 function TabAnalyze({ lang, onAddHistory, SYS }) {
   const [origPrompt, setOrigPrompt] = useState(() => load("za_analyze_orig", ""));
   const [response, setResponse] = useState("");
-  const [tasks, setTasks] = useState(null);
-  const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const correction = useAPI();
-  const [actionQuestion, setActionQuestion] = useState("");
-  const [actionLoading, setActionLoading] = useState(false);
-  const [actionResult, setActionResult] = useState("");
-  const [actionError, setActionError] = useState("");
+  const [log, setLog] = useState([]);
 
   useEffect(() => { save("za_analyze_orig", origPrompt); }, [origPrompt]);
 
-  async function handleActionQuestion() {
-    if (!actionQuestion.trim()) return;
-    setActionLoading(true); setActionResult(""); setActionError("");
-    try {
-      const sys = "Claude Code demande une confirmation ou un choix à l'utilisateur. Explique en 1-2 phrases simples en français ce que Claude Code veut faire, si c'est sûr de dire oui, et exactement quoi taper comme réponse.";
-      const ctx = [
-        origPrompt.trim() ? `Prompt original: ${origPrompt.trim()}` : "",
-        response.trim() ? `Réponse de Claude Code: ${response.trim()}` : "",
-        `Claude Code demande maintenant: ${actionQuestion.trim()}`
-      ].filter(Boolean).join("\n\n");
-      const r = await callAPI(sys, ctx);
-      setActionResult(r);
-    } catch (e) { setActionError(e.message || "Erreur inattendue"); }
-    finally { setActionLoading(false); }
-  }
-
   async function analyze() {
     if (!origPrompt.trim() || !response.trim()) return;
-    setLoading(true); setError(null); setTasks(null); setSummary("");
+    setLoading(true); setError(null);
     try {
       const content = `Prompt original:\n${origPrompt}\n\nRéponse de Claude Code:\n${response}`;
       const r = await callAPI(SYS.analyze, content);
@@ -292,14 +270,18 @@ function TabAnalyze({ lang, onAddHistory, SYS }) {
         const clean = r.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
         parsed = JSON.parse(clean);
       } catch { throw new Error("La réponse n'était pas au format attendu. Réessaie."); }
-      setTasks(parsed.tasks || []);
-      setSummary(parsed.summary || "");
+      const tasks = parsed.tasks || [];
+      const entry = makeEntry("Analyse réponse", `Prompt: ${origPrompt.slice(0, 200)}\n\nRéponse: ${response.slice(0, 300)}`, r, {
+        tasks, summary: parsed.summary || "",
+        doneCount: tasks.filter(t => t.done).length, totalCount: tasks.length,
+        origPrompt: origPrompt.trim(), response: response.trim()
+      });
+      setLog(prev => [entry, ...prev]);
+      setResponse("");
       onAddHistory("🔍 Analyse: " + origPrompt.slice(0, 80), r);
     } catch (e) { setError(e.message || "Erreur inattendue"); }
     finally { setLoading(false); }
   }
-
-  const missingTasks = tasks ? tasks.filter(t => !t.done) : [];
 
   return (
     <div>
@@ -325,78 +307,9 @@ function TabAnalyze({ lang, onAddHistory, SYS }) {
           <button onClick={analyze} style={cs.btnSec}>Réessayer</button>
         </div>
       )}
-      {tasks && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ ...cs.card, border: "1px solid #c5bff5", background: "#f5f4ff" }}>
-            <div style={{ marginBottom: 12 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#534AB7", letterSpacing: "0.05em" }}>
-                🔍 RÉSULTAT — {tasks.filter(t => t.done).length}/{tasks.length} tâches complétées
-              </span>
-            </div>
-            {tasks.map((t, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderBottom: i < tasks.length - 1 ? "1px solid #e8e4ff" : "none" }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>{t.done ? "✅" : "❌"}</span>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: t.done ? "#1b5e20" : "#c62828", margin: "0 0 2px" }}>{t.description}</p>
-                  {t.note && <p style={{ fontSize: 12, color: "#7b6fa0", margin: 0 }}>{t.note}</p>}
-                </div>
-              </div>
-            ))}
-            {summary && <p style={{ fontSize: 13, color: "#534AB7", margin: "12px 0 0", fontStyle: "italic" }}>{summary}</p>}
-          </div>
-          {missingTasks.length > 0 && (
-            <div style={{ ...cs.card, background: "#ede9ff", border: "1px solid #c5bff5" }}>
-              <p style={{ fontSize: 13, color: "#534AB7", margin: "0 0 10px" }}>
-                Il manque {missingTasks.length} tâche{missingTasks.length > 1 ? "s" : ""}. Génère le message de correction à envoyer à Claude Code.
-              </p>
-              <button onClick={() => {
-                const missing = missingTasks.map((t, i) => `${i + 1}. ${t.description}${t.note ? " — " + t.note : ""}`).join("\n");
-                const corrPrompt = `Ces tâches n'ont pas été complétées. Fais-les maintenant :\n\n${missing}\n\nContexte : ${origPrompt.slice(0, 200)}`;
-                correction.run(SYS.correction(lang), corrPrompt, (r) => onAddHistory("🔧 Correction: " + origPrompt.slice(0, 80), r));
-              }} disabled={correction.loading} style={cs.btnMain(correction.loading)}>
-                {correction.loading ? "⏳ Génération..." : "🔧 Demander ce qui manque"}
-              </button>
-              <ErrBox msg={correction.error} />
-              {correction.result && (
-                <div style={{ ...cs.card, border: "2px solid #534AB7", marginTop: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <span style={cs.lbl}>🔧 MESSAGE À COPIER</span>
-                    <CopyBtn text={correction.result} />
-                  </div>
-                  <pre style={cs.pre}>{correction.result}</pre>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      {/* Claude Code demande une action ? */}
-      <div style={cs.card}>
-        <label style={cs.lbl}>CLAUDE CODE DEMANDE UNE ACTION ?</label>
-        <p style={cs.tip}>Colle ce que Claude Code te demande (confirmation, choix, question) — je t'explique quoi répondre.</p>
-        <textarea value={actionQuestion} onChange={e => setActionQuestion(e.target.value)} rows={3}
-          placeholder="Ex: Do you want me to overwrite the existing file? (y/n)&#10;Ex: Should I delete the old component? This action cannot be undone."
-          style={{ ...cs.ta, marginBottom: 10 }} />
-        {actionError && (
-          <div style={{ background: "#fff0f0", border: "1px solid #ffcdd2", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
-            <p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {actionError}</p>
-            <button onClick={handleActionQuestion} style={cs.btnSec}>Réessayer</button>
-          </div>
-        )}
-        <button onClick={handleActionQuestion} disabled={actionLoading || !actionQuestion.trim()}
-          style={{ ...cs.btnMain(actionLoading || !actionQuestion.trim()), width: "auto", padding: "10px 22px" }}>
-          {actionLoading ? "⏳ Analyse..." : "💬 Que dois-je répondre ?"}
-        </button>
-        {actionResult && (
-          <div style={{ ...cs.card, background: "#f0fdf4", border: "1px solid #86efac", marginTop: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#15803d", letterSpacing: "0.05em" }}>💬 QUOI RÉPONDRE</span>
-              <CopyBtn text={actionResult} />
-            </div>
-            <pre style={{ ...cs.pre, color: "#14532d" }}>{actionResult}</pre>
-          </div>
-        )}
-      </div>
+      <LogList log={log} onClear={() => setLog([])}>
+        {log.map(entry => <AnalyzeLogEntry key={entry.id} entry={entry} lang={lang} SYS={SYS} />)}
+      </LogList>
     </div>
   );
 }
@@ -528,10 +441,181 @@ function TabImageAnalyze() {
   );
 }
 
+// ─────────────────────────────────────────────────────────
+// SHARED LOG COMPONENTS
+// ─────────────────────────────────────────────────────────
+function SimpleLogEntry({ entry }) {
+  const [showInput, setShowInput] = useState(false);
+  return (
+    <div style={{ borderBottom: "1px solid #e8e4ff", paddingBottom: 14, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: "#9e96c0" }}>{entry.time}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: "#534AB7", background: "#ede9ff", borderRadius: 99, padding: "1px 8px" }}>{entry.label}</span>
+      </div>
+      <button onClick={() => setShowInput(s => !s)} style={{ fontSize: 11, color: "#9e96c0", background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: showInput ? 6 : 0 }}>
+        {showInput ? "↑ Masquer la demande" : "↓ Voir la demande"}
+      </button>
+      {showInput && <pre style={{ fontSize: 12, color: "#7b6fa0", background: "#f8f7ff", borderRadius: 8, padding: "8px 12px", marginBottom: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit", margin: "0 0 8px" }}>{entry.input}</pre>}
+      <div style={{ ...cs.card, marginBottom: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={cs.lbl}>RÉSULTAT</span>
+          <CopyBtn text={entry.result} />
+        </div>
+        <pre style={cs.pre}>{entry.result}</pre>
+      </div>
+    </div>
+  );
+}
+
+function LogList({ log, onClear, children }) {
+  if (!log.length) return null;
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: "2px solid #ede9ff" }}>
+        <span style={{ fontSize: 12, color: "#7b6fa0", fontWeight: 600 }}>📜 FIL DE SESSION — {log.length} entrée{log.length > 1 ? "s" : ""}</span>
+        <button onClick={onClear} style={{ ...cs.btnSec, fontSize: 11, padding: "4px 10px" }}>🗑️ Effacer le fil</button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function makeEntry(label, input, result, extra) {
+  const now = new Date();
+  return { id: Date.now(), time: now.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" }), label, input, result, ...extra };
+}
+
+// ─────────────────────────────────────────────────────────
+// ANALYZE LOG ENTRY (complex — tasks checklist + action question)
+// ─────────────────────────────────────────────────────────
+function AnalyzeLogEntry({ entry, lang, SYS }) {
+  const [showInput, setShowInput] = useState(false);
+  const [corrResult, setCorrResult] = useState("");
+  const [corrLoading, setCorrLoading] = useState(false);
+  const [corrError, setCorrError] = useState("");
+  const [actionQ, setActionQ] = useState("");
+  const [actionResult, setActionResult] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const missingTasks = (entry.tasks || []).filter(t => !t.done);
+
+  async function handleCorrection() {
+    setCorrLoading(true); setCorrResult(""); setCorrError("");
+    try {
+      const missing = missingTasks.map((t, i) => `${i + 1}. ${t.description}${t.note ? " — " + t.note : ""}`).join("\n");
+      const corrPrompt = `Ces tâches n'ont pas été complétées. Fais-les maintenant :\n\n${missing}\n\nContexte : ${(entry.origPrompt || "").slice(0, 200)}`;
+      const sys = `Write a correction prompt for Claude Code in ${lang === "en" ? "English" : "French"}. Based on the analysis, list ONLY what needs to be fixed as numbered tasks. Be specific. Include validation steps. End with checklist. Reply ONLY with the prompt.`;
+      const r = await callAPI(sys, corrPrompt);
+      setCorrResult(r);
+    } catch (e) { setCorrError(e.message || "Erreur"); }
+    setCorrLoading(false);
+  }
+
+  async function handleAction() {
+    if (!actionQ.trim()) return;
+    setActionLoading(true); setActionResult(""); setActionError("");
+    try {
+      const sys = "Claude Code demande une confirmation ou un choix à l'utilisateur. Explique en 1-2 phrases simples en français ce que Claude Code veut faire, si c'est sûr de dire oui, et exactement quoi taper comme réponse.";
+      const ctx = [
+        entry.origPrompt ? `Prompt original: ${entry.origPrompt}` : "",
+        entry.response ? `Réponse de Claude Code: ${entry.response}` : "",
+        `Claude Code demande maintenant: ${actionQ.trim()}`
+      ].filter(Boolean).join("\n\n");
+      const r = await callAPI(sys, ctx);
+      setActionResult(r);
+    } catch (e) { setActionError(e.message || "Erreur"); }
+    setActionLoading(false);
+  }
+
+  return (
+    <div style={{ borderBottom: "1px solid #e8e4ff", paddingBottom: 16, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: "#9e96c0" }}>{entry.time}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: "#534AB7", background: "#ede9ff", borderRadius: 99, padding: "1px 8px" }}>{entry.label}</span>
+        <span style={{ fontSize: 11, color: entry.doneCount === entry.totalCount && entry.totalCount > 0 ? "#15803d" : "#c62828" }}>
+          {entry.doneCount}/{entry.totalCount} tâches ✓
+        </span>
+      </div>
+      <button onClick={() => setShowInput(s => !s)} style={{ fontSize: 11, color: "#9e96c0", background: "none", border: "none", cursor: "pointer", padding: "0 0 8px" }}>
+        {showInput ? "↑ Masquer la demande" : "↓ Voir la demande"}
+      </button>
+      {showInput && <pre style={{ fontSize: 12, color: "#7b6fa0", background: "#f8f7ff", borderRadius: 8, padding: "8px 12px", marginBottom: 8, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit" }}>{entry.input}</pre>}
+      <div style={{ ...cs.card, border: "1px solid #c5bff5", background: "#f5f4ff", marginBottom: 0 }}>
+        {(entry.tasks || []).map((t, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "6px 0", borderBottom: i < entry.tasks.length - 1 ? "1px solid #e8e4ff" : "none" }}>
+            <span style={{ fontSize: 15, flexShrink: 0 }}>{t.done ? "✅" : "❌"}</span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: t.done ? "#1b5e20" : "#c62828", margin: "0 0 2px" }}>{t.description}</p>
+              {t.note && <p style={{ fontSize: 12, color: "#7b6fa0", margin: 0 }}>{t.note}</p>}
+            </div>
+          </div>
+        ))}
+        {entry.summary && <p style={{ fontSize: 13, color: "#534AB7", margin: "10px 0 0", fontStyle: "italic" }}>{entry.summary}</p>}
+      </div>
+      {missingTasks.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={handleCorrection} disabled={corrLoading} style={{ ...cs.btnSec, fontSize: 12 }}>
+            {corrLoading ? "⏳..." : `🔧 Demander ce qui manque (${missingTasks.length})`}
+          </button>
+          {corrError && <p style={{ fontSize: 12, color: "#c62828", margin: "4px 0 0" }}>❌ {corrError} <button onClick={handleCorrection} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 12 }}>Réessayer</button></p>}
+          {corrResult && (
+            <div style={{ ...cs.card, border: "2px solid #534AB7", marginTop: 8, marginBottom: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={cs.lbl}>🔧 MESSAGE À COPIER</span>
+                <CopyBtn text={corrResult} />
+              </div>
+              <pre style={cs.pre}>{corrResult}</pre>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e2defc" }}>
+        <label style={{ ...cs.lbl, color: "#0369a1" }}>CLAUDE CODE DEMANDE UNE ACTION ?</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={actionQ} onChange={e => setActionQ(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && actionQ.trim()) handleAction(); }}
+            placeholder="Colle ce que Claude Code te demande (confirmation, choix)…"
+            style={{ ...cs.ta, resize: "none", height: 36, padding: "8px 11px", flex: 1, fontSize: 13 }} />
+          <button onClick={handleAction} disabled={actionLoading || !actionQ.trim()}
+            style={{ background: actionLoading || !actionQ.trim() ? "#b8b0e8" : "#0369a1", color: "white", border: "none", borderRadius: 9, padding: "8px 14px", cursor: actionLoading || !actionQ.trim() ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, flexShrink: 0 }}>
+            {actionLoading ? "⏳" : "💬 Quoi répondre ?"}
+          </button>
+        </div>
+        {actionError && <p style={{ fontSize: 12, color: "#c62828", margin: "4px 0 0" }}>❌ {actionError} <button onClick={handleAction} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 12 }}>Réessayer</button></p>}
+        {actionResult && (
+          <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "10px 12px", marginTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d" }}>💬 QUOI RÉPONDRE</span>
+              <CopyBtn text={actionResult} />
+            </div>
+            <pre style={{ ...cs.pre, color: "#14532d" }}>{actionResult}</pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TabImprove({ onAddHistory, SYS }) {
   const [bad, setBad] = useState("");
   const [context, setContext] = useState("");
-  const improve = useAPI();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [log, setLog] = useState([]);
+
+  async function submit() {
+    if (!bad.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const content = context.trim() ? `${bad}\n\nContexte: ${context}` : bad;
+      const r = await callAPI(SYS.improve, content);
+      setLog(prev => [makeEntry("Améliorer demande", bad, r), ...prev]);
+      onAddHistory("🔧 Amélioration: " + bad.slice(0, 80), r);
+      setBad(""); setContext("");
+    } catch (e) { setError(e.message || "Erreur"); }
+    setLoading(false);
+  }
+
   return (
     <div>
       <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2" }}>
@@ -543,11 +627,13 @@ function TabImprove({ onAddHistory, SYS }) {
           placeholder="Colle ici la demande qui n'a pas donné le bon résultat..." style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => improve.run(SYS.improve, context.trim() ? `${bad}\n\nContexte: ${context}` : bad, (r) => onAddHistory("🔧 Amélioration: " + bad.slice(0, 80), r))} disabled={improve.loading || !bad.trim()} style={cs.btnMain(improve.loading || !bad.trim())}>
-        {improve.loading ? "⏳ Analyse..." : "🔧 Améliorer ma demande"}
+      <button onClick={submit} disabled={loading || !bad.trim()} style={cs.btnMain(loading || !bad.trim())}>
+        {loading ? "⏳ Analyse..." : "🔧 Améliorer ma demande"}
       </button>
-      <ErrBox msg={improve.error} />
-      <ResultBox label="🔧 DEMANDE AMÉLIORÉE" content={improve.result} />
+      {error && <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}><p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {error}</p><button onClick={submit} style={cs.btnSec}>Réessayer</button></div>}
+      <LogList log={log} onClear={() => setLog([])}>
+        {log.map(e => <SimpleLogEntry key={e.id} entry={e} />)}
+      </LogList>
     </div>
   );
 }
@@ -555,39 +641,90 @@ function TabImprove({ onAddHistory, SYS }) {
 function TabDebug({ onAddHistory, SYS }) {
   const [convo, setConvo] = useState("");
   const [context, setContext] = useState("");
-  const debug = useAPI();
+  const [convoType, setConvoType] = useState("zenalpha");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [log, setLog] = useState([]);
+
+  const TYPE_LABELS = { claudecode: "Claude Code", zenalpha: "ZenAlpha", autre: "Autre" };
+  const TYPE_SYS = {
+    claudecode: SYS.debugConvo,
+    zenalpha: `Tu analyses des conversations problématiques entre un utilisateur et l'assistant IA de ZenAlpha (une app mobile de gestion). Quand l'utilisateur colle une conversation qui a mal tourné:\n1. IDENTIFIE CE QUI N'A PAS MARCHÉ — pourquoi l'IA a mal compris ou mal répondu (2-3 lignes)\n2. EXPLIQUE POURQUOI en français simple\n3. DONNE LE MESSAGE EXACT À ENVOYER À ZENALPHA — prêt à copier, en français, pour corriger la situation sans recommencer`,
+    autre: `Tu analyses des conversations problématiques. Identifie ce qui n'a pas fonctionné et donne des conseils pratiques pour corriger la situation. Réponds en français simple avec:\n1. CE QUI N'A PAS MARCHÉ\n2. POURQUOI\n3. QUOI FAIRE pour corriger`
+  };
+
+  async function submit() {
+    if (!convo.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const content = context.trim() ? `${convo}\n\nContexte additionnel: ${context}` : convo;
+      const r = await callAPI(TYPE_SYS[convoType], content);
+      const label = `Debug ${TYPE_LABELS[convoType]}`;
+      setLog(prev => [makeEntry(label, convo, r), ...prev]);
+      onAddHistory(`💬 Debug ${TYPE_LABELS[convoType]}: ` + convo.slice(0, 80), r);
+      setConvo(""); setContext("");
+    } catch (e) { setError(e.message || "Erreur"); }
+    setLoading(false);
+  }
+
   return (
     <div>
       <div style={{ ...cs.card, background: "#f0f4ff", border: "1px solid #c7d2fe" }}>
-        <p style={{ fontSize: 13, color: "#3730a3", margin: 0 }}>💬 Colle une portion de conversation problématique. J'identifie le problème et te donne exactement quoi écrire.</p>
+        <label style={{ ...cs.lbl, marginBottom: 8 }}>CONVERSATION AVEC…</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {Object.entries(TYPE_LABELS).map(([key, lbl]) => (
+            <button key={key} onClick={() => setConvoType(key)}
+              style={{ background: convoType === key ? "#534AB7" : "transparent", color: convoType === key ? "white" : "#534AB7", border: "1px solid #c5bff5", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", flex: 1 }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <p style={{ ...cs.tip, marginTop: 8, marginBottom: 0 }}>
+          {convoType === "claudecode" && "🛠️ Debug une conversation avec Claude Code — donne le message exact à envoyer."}
+          {convoType === "zenalpha" && "📱 Debug une conversation avec l'IA de ZenAlpha — explique ce qui a mal tourné et quoi lui dire."}
+          {convoType === "autre" && "💬 Analyse générique — identifie le problème et donne des conseils pratiques."}
+        </p>
       </div>
       <div style={cs.card}>
         <label style={cs.lbl}>LA PORTION DE CONVERSATION PROBLÉMATIQUE</label>
         <textarea value={convo} onChange={e => setConvo(e.target.value)} rows={8}
-          placeholder={"Moi : Ajoute un bouton rouge\nClaude : J'ai ajouté un bouton bleu...\nMoi : Non c'est pas ça\nClaude : ..."} style={cs.ta} />
+          placeholder={convoType === "zenalpha"
+            ? "Moi : Montre-moi les heures de la semaine passée\nZenAlpha : Je n'ai pas accès à ces données...\nMoi : ..."
+            : "Moi : Ajoute un bouton rouge\nClaude : J'ai ajouté un bouton bleu...\nMoi : Non c'est pas ça"}
+          style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => debug.run(SYS.debugConvo, context.trim() ? `${convo}\n\nContexte additionnel: ${context}` : convo, (r) => onAddHistory("💬 Debug: " + convo.slice(0, 80), r))} disabled={debug.loading || !convo.trim()} style={cs.btnMain(debug.loading || !convo.trim())}>
-        {debug.loading ? "⏳ Analyse..." : "💬 Déboguer cette conversation"}
+      <button onClick={submit} disabled={loading || !convo.trim()} style={cs.btnMain(loading || !convo.trim())}>
+        {loading ? "⏳ Analyse..." : `💬 Déboguer cette conversation`}
       </button>
-      <ErrBox msg={debug.error} />
-      {debug.result && (
-        <div style={{ ...cs.card, border: "1px solid #c7d2fe", marginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={{ ...cs.lbl, color: "#3730a3", margin: 0 }}>💬 ANALYSE + QUOI ÉCRIRE</span>
-            <CopyBtn text={debug.result} />
-          </div>
-          <pre style={cs.pre}>{debug.result}</pre>
-        </div>
-      )}
+      {error && <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}><p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {error}</p><button onClick={submit} style={cs.btnSec}>Réessayer</button></div>}
+      <LogList log={log} onClear={() => setLog([])}>
+        {log.map(e => <SimpleLogEntry key={e.id} entry={e} />)}
+      </LogList>
     </div>
   );
 }
 
 function TabError({ onAddHistory, SYS }) {
-  const [error, setError] = useState("");
+  const [errorText, setErrorText] = useState("");
   const [context, setContext] = useState("");
-  const explain = useAPI();
+  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [log, setLog] = useState([]);
+
+  async function submit() {
+    if (!errorText.trim()) return;
+    setLoading(true); setSubmitError("");
+    try {
+      const content = context.trim() ? `${errorText}\n\nContexte: ${context}` : errorText;
+      const r = await callAPI(SYS.explainError, content);
+      setLog(prev => [makeEntry("Expliquer erreur", errorText, r), ...prev]);
+      onAddHistory("⚠️ Erreur: " + errorText.slice(0, 80), r);
+      setErrorText(""); setContext("");
+    } catch (e) { setSubmitError(e.message || "Erreur"); }
+    setLoading(false);
+  }
+
   return (
     <div>
       <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #fca5a5" }}>
@@ -595,23 +732,17 @@ function TabError({ onAddHistory, SYS }) {
       </div>
       <div style={cs.card}>
         <label style={cs.lbl}>LE MESSAGE D'ERREUR</label>
-        <textarea value={error} onChange={e => setError(e.target.value)} rows={5}
+        <textarea value={errorText} onChange={e => setErrorText(e.target.value)} rows={5}
           placeholder={"TypeError: Cannot read properties of undefined...\nau fichier TaskList.tsx:42..."} style={{ ...cs.ta, fontFamily: "monospace", fontSize: 13 }} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => explain.run(SYS.explainError, context.trim() ? `${error}\n\nContexte: ${context}` : error, (r) => onAddHistory("⚠️ Erreur: " + error.slice(0, 80), r))} disabled={explain.loading || !error.trim()} style={cs.btnMain(explain.loading || !error.trim())}>
-        {explain.loading ? "⏳ Analyse..." : "⚠️ Expliquer cette erreur"}
+      <button onClick={submit} disabled={loading || !errorText.trim()} style={cs.btnMain(loading || !errorText.trim())}>
+        {loading ? "⏳ Analyse..." : "⚠️ Expliquer cette erreur"}
       </button>
-      <ErrBox msg={explain.error} />
-      {explain.result && (
-        <div style={{ ...cs.card, border: "1px solid #fca5a5", marginTop: 12, background: "#fff8f8" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={{ ...cs.lbl, color: "#c62828", margin: 0 }}>⚠️ EXPLICATION + SOLUTION</span>
-            <CopyBtn text={explain.result} />
-          </div>
-          <pre style={cs.pre}>{explain.result}</pre>
-        </div>
-      )}
+      {submitError && <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}><p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {submitError}</p><button onClick={submit} style={cs.btnSec}>Réessayer</button></div>}
+      <LogList log={log} onClear={() => setLog([])}>
+        {log.map(e => <SimpleLogEntry key={e.id} entry={e} />)}
+      </LogList>
     </div>
   );
 }
@@ -619,7 +750,23 @@ function TabError({ onAddHistory, SYS }) {
 function TabSummary({ onAddHistory, SYS }) {
   const [session, setSession] = useState("");
   const [context, setContext] = useState("");
-  const summary = useAPI();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [log, setLog] = useState([]);
+
+  async function submit() {
+    if (!session.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const content = context.trim() ? `${session}\n\nContexte: ${context}` : session;
+      const r = await callAPI(SYS.sessionSummary, content);
+      setLog(prev => [makeEntry("Résumé session", session, r), ...prev]);
+      onAddHistory("📋 Résumé de session", r);
+      setSession(""); setContext("");
+    } catch (e) { setError(e.message || "Erreur"); }
+    setLoading(false);
+  }
+
   return (
     <div>
       <div style={{ ...cs.card, background: "#f0fff8", border: "1px solid #a5d6a7" }}>
@@ -631,11 +778,13 @@ function TabSummary({ onAddHistory, SYS }) {
           placeholder="Colle ici les messages importants de ta session Claude Code..." style={cs.ta} />
       </div>
       <ContextField value={context} onChange={setContext} />
-      <button onClick={() => summary.run(SYS.sessionSummary, context.trim() ? `${session}\n\nContexte: ${context}` : session, (r) => onAddHistory("📋 Résumé de session", r))} disabled={summary.loading || !session.trim()} style={cs.btnMain(summary.loading || !session.trim())}>
-        {summary.loading ? "⏳ Résumé..." : "📋 Générer le résumé"}
+      <button onClick={submit} disabled={loading || !session.trim()} style={cs.btnMain(loading || !session.trim())}>
+        {loading ? "⏳ Résumé..." : "📋 Générer le résumé"}
       </button>
-      <ErrBox msg={summary.error} />
-      <ResultBox label="📋 RÉSUMÉ DE SESSION" content={summary.result} borderColor="#a5d6a7" bg="#f0fff8" labelColor="#1b5e20" />
+      {error && <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #ffcdd2", marginTop: 10 }}><p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {error}</p><button onClick={submit} style={cs.btnSec}>Réessayer</button></div>}
+      <LogList log={log} onClear={() => setLog([])}>
+        {log.map(e => <SimpleLogEntry key={e.id} entry={e} />)}
+      </LogList>
     </div>
   );
 }
