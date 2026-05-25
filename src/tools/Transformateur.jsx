@@ -167,20 +167,61 @@ function useAPI() {
   return { result, setResult, loading, error, run };
 }
 
-function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) {
+function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt, onPromptGenerated }) {
   const [input, setInput] = useState("");
   const [section, setSection] = useState("");
   const [context, setContext] = useState("");
   const [complexity, setComplexity] = useState("medium");
   const prompt = useAPI();
   const explain = useAPI();
+  const [savedAt, setSavedAt] = useState(null);
+  const [validatorDismissed, setValidatorDismissed] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
 
   async function transform() {
     const contextPart = context.trim() ? `\n\nAdditional context from user: ${context.trim()}` : "";
     const content = section.trim() ? `Section/file: ${section.trim()}\n\nIdea: ${input.trim()}${contextPart}` : `${input.trim()}${contextPart}`;
-    prompt.run(SYS.transform(master, lang, complexity), content, (r) => onAddHistory("✦ Transformer: " + input.slice(0, 80), r));
+    setValidatorDismissed(false);
+    prompt.run(SYS.transform(master, lang, complexity), content, (r) => {
+      onAddHistory("✦ Transformer: " + input.slice(0, 80), r);
+      if (onPromptGenerated) onPromptGenerated(r);
+      setSavedAt(new Date());
+    });
     explain.setResult("");
   }
+
+  function scorePrompt(text) {
+    const checks = [
+      { label: "Taches UI", patterns: [/ui/i, /interface/i, /screen/i, /component/i, /composant/i, /bouton/i, /button/i, /affich/i, /display/i, /render/i] },
+      { label: "Logique / traitement", patterns: [/logic/i, /calcul/i, /process/i, /handler/i, /traitement/i, /function/i, /fonction/i] },
+      { label: "Sauvegarde / persistance", patterns: [/save/i, /persist/i, /storage/i, /localStorage/i, /database/i, /supabase/i, /store/i, /sauvegarder/i] },
+      { label: "Validation", patterns: [/valid/i, /check/i, /trim/i, /required/i] },
+      { label: "Feedback utilisateur", patterns: [/loading/i, /chargement/i, /success/i, /toast/i, /feedback/i, /notification/i] },
+      { label: "Gestion d erreurs", patterns: [/error/i, /erreur/i, /catch/i, /fallback/i] },
+      { label: "Integration / connexion", patterns: [/integrat/i, /connect/i, /fetch/i, /import/i, /export/i, /existing/i, /existant/i] },
+      { label: "Fichier cible", patterns: [/\.jsx/i, /\.tsx/i, /\.js/i, /\.ts/i, /fichier/i, /src\//i] },
+      { label: "Checklist finale", patterns: [/checklist/i, /verify/i] },
+    ];
+    const missing = checks.filter(c => !c.patterns.some(p => p.test(text))).map(c => c.label);
+    const score = Math.round(((checks.length - missing.length) / checks.length) * 100);
+    return { score, missing };
+  }
+
+  async function enhancePrompt(missing) {
+    if (!prompt.result) return;
+    setEnhancing(true);
+    try {
+      const sys = "You are improving a developer prompt for Claude Code. The following elements are missing or unclear: " + missing.join(", ") + ". Add them naturally without changing the overall structure or intent. Return ONLY the improved prompt, nothing else.";
+      const r = await callAPI(sys, prompt.result);
+      prompt.setResult(r);
+      if (onPromptGenerated) onPromptGenerated(r);
+      setSavedAt(new Date());
+      setValidatorDismissed(true);
+    } catch {}
+    setEnhancing(false);
+  }
+
+  const promptScore = prompt.result ? scorePrompt(prompt.result) : null;
 
   return (
     <div>
@@ -212,13 +253,39 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) 
         {prompt.loading ? "⏳ Transformation..." : "✦ Transformer en prompt"}
       </button>
       <ErrBox msg={prompt.error} />
-      {prompt.result && (
+      {prompt.result && promptScore && (
         <div style={{ ...cs.card, border: "1px solid #c5bff5", marginTop: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={cs.lbl}>✅ PROMPT PRÊT POUR CLAUDE CODE</span>
-            <CopyBtn text={prompt.result} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ background: promptScore.score >= 90 ? "#f0fdf4" : promptScore.score >= 70 ? "#fffbeb" : "#fff0f0", color: promptScore.score >= 90 ? "#16a34a" : promptScore.score >= 70 ? "#d97706" : "#dc2626", border: "1px solid " + (promptScore.score >= 90 ? "#bbf7d0" : promptScore.score >= 70 ? "#fde68a" : "#fecaca"), borderRadius: 6, padding: "3px 9px", fontSize: 12, fontWeight: 700 }}>
+                {promptScore.score}% {promptScore.score >= 90 ? "✓" : promptScore.score >= 70 ? "~" : "⚠"}
+              </span>
+              {savedAt && <span style={{ fontSize: 11, color: "#16a34a" }}>Saved ✓</span>}
+              <CopyBtn text={prompt.result} />
+            </div>
           </div>
           <pre style={cs.pre}>{prompt.result}</pre>
+          {promptScore.missing.length > 0 && !validatorDismissed && (
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "0.85rem 1rem", marginTop: 10 }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#92400e", margin: "0 0 6px" }}>
+                ⚠️ Zen Tools a détecté {promptScore.missing.length} élément{promptScore.missing.length > 1 ? "s" : ""} potentiellement manquant{promptScore.missing.length > 1 ? "s" : ""}
+              </p>
+              <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 12, color: "#78350f" }}>
+                {promptScore.missing.map(m => <li key={m}>{m}</li>)}
+              </ul>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => enhancePrompt(promptScore.missing)} disabled={enhancing}
+                  style={{ background: "#f59e0b", color: "white", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: enhancing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: enhancing ? 0.7 : 1 }}>
+                  {enhancing ? "⏳ Amélioration..." : "🔧 Ajouter automatiquement"}
+                </button>
+                <button onClick={() => setValidatorDismissed(true)}
+                  style={{ background: "transparent", color: "#92400e", border: "1px solid #fde68a", borderRadius: 7, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                  Garder tel quel
+                </button>
+              </div>
+            </div>
+          )}
           <div style={cs.divider} />
           <button onClick={() => explain.run(SYS.explain, prompt.result)} disabled={explain.loading}
             style={{ ...cs.btnSec, opacity: explain.loading ? 0.6 : 1 }}>
@@ -250,13 +317,15 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) 
   );
 }
 
-function TabAnalyze({ lang, onAddHistory, SYS, log, setLog }) {
+function TabAnalyze({ lang, onAddHistory, SYS, log, setLog, autoPrompt }) {
   const [origPrompt, setOrigPrompt] = useState(() => load("za_analyze_orig", ""));
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [autoLoaded, setAutoLoaded] = useState(false);
 
   useEffect(() => { save("za_analyze_orig", origPrompt); }, [origPrompt]);
+  useEffect(() => { if (autoPrompt && !origPrompt.trim()) { setOrigPrompt(autoPrompt); setAutoLoaded(true); } }, [autoPrompt]);
 
   async function analyze() {
     if (!origPrompt.trim() || !response.trim()) return;
@@ -287,9 +356,14 @@ function TabAnalyze({ lang, onAddHistory, SYS, log, setLog }) {
       <div style={{ ...cs.card, background: "#fff8e1", border: "1px solid #ffe082" }}>
         <p style={{ fontSize: 13, color: "#f57f17", margin: 0 }}>📋 Colle le prompt et la réponse — je vérifie tâche par tâche ce qui a été fait et ce qui manque.</p>
       </div>
+      {autoLoaded && (
+        <div style={{ ...cs.card, background: "#f0f9ff", border: "1px solid #bae6fd", paddingTop: "0.7rem", paddingBottom: "0.7rem" }}>
+          <p style={{ fontSize: 12, color: "#0369a1", margin: 0 }}>📎 Prompt auto-chargé depuis l’onglet Transformer — tu peux le modifier</p>
+        </div>
+      )}
       <div style={cs.card}>
         <label style={cs.lbl}>LE PROMPT ORIGINAL *</label>
-        <textarea value={origPrompt} onChange={e => setOrigPrompt(e.target.value)} rows={4}
+        <textarea value={origPrompt} onChange={e => { setOrigPrompt(e.target.value); setAutoLoaded(false); }} rows={4}
           placeholder="Colle ici la demande exacte que tu avais envoyée à Claude Code..." style={cs.ta} />
       </div>
       <div style={cs.card}>
@@ -1638,6 +1712,7 @@ export default function Transformateur() {
   const [debugLog, setDebugLog] = useState([]);
   const [errorLog, setErrorLog] = useState([]);
   const [summaryLog, setSummaryLog] = useState([]);
+  const [lastGeneratedPrompt, setLastGeneratedPrompt] = useState(() => load("za_last_prompt", ""));
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
   const [transformInput, setTransformInput] = useState("");
@@ -1655,6 +1730,7 @@ export default function Transformateur() {
   const [timerReminder, setTimerReminder] = useState(null);
 
   useEffect(() => save("za_lang", lang), [lang]);
+  useEffect(() => save("za_last_prompt", lastGeneratedPrompt), [lastGeneratedPrompt]);
   useEffect(() => save("za_project_mode", projectMode), [projectMode]);
   useEffect(() => save("za_project_desc", projectDesc), [projectDesc]);
   useEffect(() => { save("za_session", session); }, [session]);
@@ -1939,8 +2015,8 @@ export default function Transformateur() {
       </div>
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
         {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} elapsed={elapsed} timerReminder={timerReminder} linkedPrompts={linkedPrompts} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onCycleStep={cycleStepState} onDeleteStep={deleteStep} onUpdateBlocked={updateStepBlocked} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
-        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} />}
-        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} log={analyzeLog} setLog={setAnalyzeLog} />}
+        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} onPromptGenerated={setLastGeneratedPrompt} />}
+        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} log={analyzeLog} setLog={setAnalyzeLog} autoPrompt={lastGeneratedPrompt} />}
         {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} log={improveLog} setLog={setImproveLog} />}
         {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} log={debugLog} setLog={setDebugLog} />}
         {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} log={errorLog} setLog={setErrorLog} />}
