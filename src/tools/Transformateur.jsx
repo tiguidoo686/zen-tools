@@ -250,12 +250,11 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) 
   );
 }
 
-function TabAnalyze({ lang, onAddHistory, SYS }) {
+function TabAnalyze({ lang, onAddHistory, SYS, log, setLog }) {
   const [origPrompt, setOrigPrompt] = useState(() => load("za_analyze_orig", ""));
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [log, setLog] = useState([]);
 
   useEffect(() => { save("za_analyze_orig", origPrompt); }, [origPrompt]);
 
@@ -596,12 +595,11 @@ function AnalyzeLogEntry({ entry, lang, SYS }) {
   );
 }
 
-function TabImprove({ onAddHistory, SYS }) {
+function TabImprove({ onAddHistory, SYS, log, setLog }) {
   const [bad, setBad] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [log, setLog] = useState([]);
 
   async function submit() {
     if (!bad.trim()) return;
@@ -638,13 +636,12 @@ function TabImprove({ onAddHistory, SYS }) {
   );
 }
 
-function TabDebug({ onAddHistory, SYS }) {
+function TabDebug({ onAddHistory, SYS, log, setLog }) {
   const [convo, setConvo] = useState("");
   const [context, setContext] = useState("");
   const [convoType, setConvoType] = useState("zenalpha");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [log, setLog] = useState([]);
 
   const TYPE_LABELS = { claudecode: "Claude Code", zenalpha: "ZenAlpha", autre: "Autre" };
   const TYPE_SYS = {
@@ -705,12 +702,11 @@ function TabDebug({ onAddHistory, SYS }) {
   );
 }
 
-function TabError({ onAddHistory, SYS }) {
+function TabError({ onAddHistory, SYS, log, setLog }) {
   const [errorText, setErrorText] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [log, setLog] = useState([]);
 
   async function submit() {
     if (!errorText.trim()) return;
@@ -747,12 +743,11 @@ function TabError({ onAddHistory, SYS }) {
   );
 }
 
-function TabSummary({ onAddHistory, SYS }) {
+function TabSummary({ onAddHistory, SYS, log, setLog }) {
   const [session, setSession] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [log, setLog] = useState([]);
 
   async function submit() {
     if (!session.trim()) return;
@@ -1638,6 +1633,11 @@ export default function Transformateur() {
   const [projectMode, setProjectMode] = useState(() => load("za_project_mode", "zenalpha"));
   const [projectDesc, setProjectDesc] = useState(() => load("za_project_desc", ""));
   const [history, setHistory] = useState([]);
+  const [analyzeLog, setAnalyzeLog] = useState([]);
+  const [improveLog, setImproveLog] = useState([]);
+  const [debugLog, setDebugLog] = useState([]);
+  const [errorLog, setErrorLog] = useState([]);
+  const [summaryLog, setSummaryLog] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
   const [transformInput, setTransformInput] = useState("");
@@ -1940,12 +1940,12 @@ export default function Transformateur() {
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
         {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} elapsed={elapsed} timerReminder={timerReminder} linkedPrompts={linkedPrompts} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onCycleStep={cycleStepState} onDeleteStep={deleteStep} onUpdateBlocked={updateStepBlocked} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
         {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} />}
-        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} />}
-        {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} />}
-        {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} />}
-        {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} log={analyzeLog} setLog={setAnalyzeLog} />}
+        {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} log={improveLog} setLog={setImproveLog} />}
+        {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} log={debugLog} setLog={setDebugLog} />}
+        {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} log={errorLog} setLog={setErrorLog} />}
         {tab === "imageanalyze" && <TabImageAnalyze />}
-        {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} log={summaryLog} setLog={setSummaryLog} />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
         {tab === "history" && <TabHistory history={history} loading={historyLoading} error={historyError} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}
