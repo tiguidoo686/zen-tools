@@ -648,9 +648,9 @@ function TabDebug({ onAddHistory, SYS }) {
 
   const TYPE_LABELS = { claudecode: "Claude Code", zenalpha: "ZenAlpha", autre: "Autre" };
   const TYPE_SYS = {
-    claudecode: SYS.debugConvo,
-    zenalpha: `Tu analyses des conversations problématiques entre un utilisateur et l'assistant IA de ZenAlpha (une app mobile de gestion). Quand l'utilisateur colle une conversation qui a mal tourné:\n1. IDENTIFIE CE QUI N'A PAS MARCHÉ — pourquoi l'IA a mal compris ou mal répondu (2-3 lignes)\n2. EXPLIQUE POURQUOI en français simple\n3. DONNE LE MESSAGE EXACT À ENVOYER À ZENALPHA — prêt à copier, en français, pour corriger la situation sans recommencer`,
-    autre: `Tu analyses des conversations problématiques. Identifie ce qui n'a pas fonctionné et donne des conseils pratiques pour corriger la situation. Réponds en français simple avec:\n1. CE QUI N'A PAS MARCHÉ\n2. POURQUOI\n3. QUOI FAIRE pour corriger`
+    claudecode: `Tu analyses une conversation problématique avec Claude Code (l'outil de développement IA). Génère TOUJOURS ces deux sections en français:\n\n🔴 CE QUI A MAL TOURNÉ\nExplique en 2-3 lignes simples pourquoi Claude Code a mal compris ou mal agi.\n\n🔧 MESSAGE POUR CLAUDE CODE\nRédige le prompt exact à envoyer à Claude Code pour corriger le problème dans le code. En anglais, précis, avec les fichiers et fonctions concernés si possible. Le prompt doit permettre de réparer le code directement.`,
+    zenalpha: `Tu analyses une conversation problématique avec l'assistant IA de ZenAlpha (une app mobile de gestion). Génère TOUJOURS ces deux sections en français:\n\n🔴 CE QUI A MAL TOURNÉ\nExplique en 2-3 lignes simples pourquoi l'IA de ZenAlpha a mal répondu ou mal compris.\n\n🔧 MESSAGE POUR CLAUDE CODE\nRédige le prompt exact à envoyer à Claude Code pour réparer le code de ZenAlpha qui cause ce problème. En anglais, précis, avec le fichier ou la fonction à corriger. Ce message est pour Claude Code, pas pour ZenAlpha.`,
+    autre: `Tu analyses une conversation problématique. Génère TOUJOURS ces deux sections en français:\n\n🔴 CE QUI A MAL TOURNÉ\nExplique en 2-3 lignes simples ce qui n'a pas fonctionné dans la conversation.\n\n💡 CONSEIL PRATIQUE\nDonne les actions concrètes pour corriger la situation.`
   };
 
   async function submit() {
