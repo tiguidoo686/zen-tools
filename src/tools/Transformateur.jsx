@@ -1544,7 +1544,7 @@ export default function Transformateur() {
       // If overwhelmed, auto-break objective into smaller steps
       if (emotional_state === "overwhelmed") {
         try {
-          const sys = "Tu décomposes un objectif de travail en sous-étapes très petites et concrètes pour quelqu'un qui se sent dépassé. Maximum 5 étapes. Réponds UNIQUEMENT avec un JSON: {"steps":["étape 1","étape 2",...]}";
+          const sys = `Tu décomposes un objectif de travail en sous-étapes très petites et concrètes pour quelqu'un qui se sent dépassé. Maximum 5 étapes. Réponds UNIQUEMENT avec un JSON: {"steps":["étape 1","étape 2",...]}`;
           const r = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content: "Objectif: " + objective }) });
           if (r.ok) {
             const d = await r.json();
