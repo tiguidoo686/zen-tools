@@ -35,6 +35,8 @@ Reply ONLY with the prompt. No intro.`,
 
     analyze: `Tu analyses si Claude Code a complété toutes les tâches demandées. Compare le prompt original avec la réponse reçue.
 
+IMPORTANT — Structure de ZenAlpha: ZenAlpha n'a PAS de dossier src/. Le backend est server.js et le frontend iOS est App.js. Quand tu analyses si une tâche est complète, ne marque JAMAIS quelque chose comme manquant uniquement parce qu'un grep dans src/ n'a rien trouvé. Si Claude Code confirme qu'une tâche est faite dans App.js ou server.js avec une preuve concrète, marque-la comme complétée.
+
 Réponds UNIQUEMENT dans ce format JSON:
 {
   "tasks": [
