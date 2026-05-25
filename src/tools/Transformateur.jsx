@@ -258,8 +258,28 @@ function TabAnalyze({ lang, onAddHistory, SYS }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const correction = useAPI();
+  const [actionQuestion, setActionQuestion] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionResult, setActionResult] = useState("");
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => { save("za_analyze_orig", origPrompt); }, [origPrompt]);
+
+  async function handleActionQuestion() {
+    if (!actionQuestion.trim()) return;
+    setActionLoading(true); setActionResult(""); setActionError("");
+    try {
+      const sys = "Claude Code demande une confirmation ou un choix à l'utilisateur. Explique en 1-2 phrases simples en français ce que Claude Code veut faire, si c'est sûr de dire oui, et exactement quoi taper comme réponse.";
+      const ctx = [
+        origPrompt.trim() ? `Prompt original: ${origPrompt.trim()}` : "",
+        response.trim() ? `Réponse de Claude Code: ${response.trim()}` : "",
+        `Claude Code demande maintenant: ${actionQuestion.trim()}`
+      ].filter(Boolean).join("\n\n");
+      const r = await callAPI(sys, ctx);
+      setActionResult(r);
+    } catch (e) { setActionError(e.message || "Erreur inattendue"); }
+    finally { setActionLoading(false); }
+  }
 
   async function analyze() {
     if (!origPrompt.trim() || !response.trim()) return;
@@ -350,6 +370,33 @@ function TabAnalyze({ lang, onAddHistory, SYS }) {
           )}
         </div>
       )}
+      {/* Claude Code demande une action ? */}
+      <div style={cs.card}>
+        <label style={cs.lbl}>CLAUDE CODE DEMANDE UNE ACTION ?</label>
+        <p style={cs.tip}>Colle ce que Claude Code te demande (confirmation, choix, question) — je t'explique quoi répondre.</p>
+        <textarea value={actionQuestion} onChange={e => setActionQuestion(e.target.value)} rows={3}
+          placeholder="Ex: Do you want me to overwrite the existing file? (y/n)&#10;Ex: Should I delete the old component? This action cannot be undone."
+          style={{ ...cs.ta, marginBottom: 10 }} />
+        {actionError && (
+          <div style={{ background: "#fff0f0", border: "1px solid #ffcdd2", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+            <p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {actionError}</p>
+            <button onClick={handleActionQuestion} style={cs.btnSec}>Réessayer</button>
+          </div>
+        )}
+        <button onClick={handleActionQuestion} disabled={actionLoading || !actionQuestion.trim()}
+          style={{ ...cs.btnMain(actionLoading || !actionQuestion.trim()), width: "auto", padding: "10px 22px" }}>
+          {actionLoading ? "⏳ Analyse..." : "💬 Que dois-je répondre ?"}
+        </button>
+        {actionResult && (
+          <div style={{ ...cs.card, background: "#f0fdf4", border: "1px solid #86efac", marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#15803d", letterSpacing: "0.05em" }}>💬 QUOI RÉPONDRE</span>
+              <CopyBtn text={actionResult} />
+            </div>
+            <pre style={{ ...cs.pre, color: "#14532d" }}>{actionResult}</pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
