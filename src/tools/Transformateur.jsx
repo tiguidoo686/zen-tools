@@ -167,7 +167,7 @@ function useAPI() {
   return { result, setResult, loading, error, run };
 }
 
-function TabTransform({ lang, master, onAddHistory, SYS }) {
+function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt }) {
   const [input, setInput] = useState("");
   const [section, setSection] = useState("");
   const [context, setContext] = useState("");
@@ -230,6 +230,20 @@ function TabTransform({ lang, master, onAddHistory, SYS }) {
         <div style={{ background: "#f0fff8", border: "1px solid #a5d6a7", borderRadius: 14, padding: "1.1rem 1.25rem", marginTop: 10 }}>
           <span style={{ ...cs.lbl, color: "#1b5e20", display: "block", marginBottom: 8 }}>🧠 CE QUE CLAUDE CODE VA FAIRE</span>
           <pre style={{ ...cs.pre, color: "#1b5e20" }}>{explain.result}</pre>
+        </div>
+      )}
+      {prompt.result && steps && steps.length > 0 && (
+        <div style={{ ...cs.card, background: "#f0f9ff", border: "1px solid #bae6fd", marginTop: 10 }}>
+          <label style={{ ...cs.lbl, color: "#0369a1" }}>📎 LIER CE PROMPT À UNE ÉTAPE</label>
+          <select onChange={e => { if (e.target.value && onLinkPrompt) { onLinkPrompt(e.target.value, prompt.result); e.target.value = ""; } }}
+            style={{ ...cs.ta, height: 36, padding: "6px 11px" }}>
+            <option value="">Sélectionner une étape…</option>
+            {steps.filter(s => s.state !== "done" && !s.completed).map(s => {
+              const lid = String(s._lid || s.id);
+              return <option key={lid} value={lid}>{s.text.slice(0, 60)}</option>;
+            })}
+          </select>
+          <p style={{ ...cs.tip, marginTop: 4 }}>Le prompt sera visible dans l'Ancre avec une icône 📎 sur l'étape.</p>
         </div>
       )}
     </div>
@@ -703,24 +717,52 @@ function TabHistory({ history, loading, error, onClear }) {
 // ─────────────────────────────────────────────────────────
 // SESSION BANNER — always visible across all tabs
 // ─────────────────────────────────────────────────────────
-function SessionBanner({ session, steps, onGoToAncre }) {
-  const completed = steps.filter(s => s.completed).length;
+function VictoryBanner({ state }) {
+  if (!state) return null;
+  const { stepText, done, total } = state;
+  return (
+    <div style={{
+      position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
+      background: "#16a34a", color: "white", borderRadius: 14, padding: "14px 22px",
+      zIndex: 9999, boxShadow: "0 8px 32px rgba(22,163,74,0.45)",
+      maxWidth: "90vw", textAlign: "center", pointerEvents: "none",
+      animation: "victorybounce 0.4s cubic-bezier(.36,.07,.19,.97)"
+    }}>
+      <p style={{ margin: "0 0 4px", fontSize: 22 }}>🎉</p>
+      <p style={{ margin: "0 0 2px", fontSize: 14, fontWeight: 700 }}>Bravo ! {done}/{total} étapes complétées</p>
+      <p style={{ margin: 0, fontSize: 11, opacity: 0.85 }}>{stepText.slice(0, 55)}</p>
+    </div>
+  );
+}
+
+function SessionBanner({ session, steps, elapsed, timerReminder, onGoToAncre }) {
+  const completed = steps.filter(s => s.state === "done" || s.completed).length;
   const total = steps.length;
   return (
-    <div style={{ background: "#064e3b", borderBottom: "2px solid #059669", padding: "8px 1.5rem", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 14, flexShrink: 0 }}>🎯</span>
-      <span style={{ fontSize: 13, color: "#d1fae5", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {session.objective.length > 80 ? session.objective.slice(0, 80) + "…" : session.objective}
-      </span>
-      {total > 0 && (
-        <span style={{ fontSize: 12, color: "#6ee7b7", background: "rgba(6,78,59,0.8)", padding: "2px 10px", borderRadius: 20, border: "1px solid #059669", whiteSpace: "nowrap", flexShrink: 0 }}>
-          {completed}/{total} étapes
+    <div>
+      <div style={{ background: "#064e3b", borderBottom: "2px solid #059669", padding: "8px 1.5rem", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, flexShrink: 0 }}>🎯</span>
+        <span style={{ fontSize: 13, color: "#d1fae5", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {session.objective.length > 80 ? session.objective.slice(0, 80) + "…" : session.objective}
         </span>
+        {elapsed && elapsed !== "00:00" && (
+          <span style={{ fontSize: 11, color: "#6ee7b7", whiteSpace: "nowrap", flexShrink: 0 }}>⏱ {elapsed}</span>
+        )}
+        {total > 0 && (
+          <span style={{ fontSize: 12, color: "#6ee7b7", background: "rgba(6,78,59,0.8)", padding: "2px 10px", borderRadius: 20, border: "1px solid #059669", whiteSpace: "nowrap", flexShrink: 0 }}>
+            {completed}/{total} étapes
+          </span>
+        )}
+        <button onClick={onGoToAncre}
+          style={{ background: "#059669", color: "white", border: "none", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+          Voir l'ancre
+        </button>
+      </div>
+      {timerReminder && (
+        <div style={{ background: "#1c1917", borderBottom: "1px solid #44403c", padding: "6px 1.5rem", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "#fbbf24" }}>⏰ Tu travailles sur : <strong>{session.objective.slice(0, 40)}</strong>. Prochaine étape : {timerReminder.slice(0, 50)}</span>
+        </div>
       )}
-      <button onClick={onGoToAncre}
-        style={{ background: "#059669", color: "white", border: "none", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
-        Voir l'ancre
-      </button>
     </div>
   );
 }
@@ -770,20 +812,85 @@ function SessionHistorySection({ history, expandedSummary, onExpand }) {
 }
 
 // ─────────────────────────────────────────────────────────
+// QUICK CAPTURE COMPONENT
+// ─────────────────────────────────────────────────────────
+function QuickCapture({ session, steps, onAddStep, onAddToParkingLot }) {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  async function capture() {
+    const t = text.trim(); if (!t) return;
+    setText("");
+    setLoading(true); setFeedback(null);
+    if (!session) {
+      const notes = JSON.parse(localStorage.getItem("za_quick_notes") || "[]");
+      notes.unshift({ text: t, created_at: new Date().toISOString() });
+      localStorage.setItem("za_quick_notes", JSON.stringify(notes.slice(0, 20)));
+      setFeedback("📝 Noté (aucune session active)");
+      setTimeout(() => setFeedback(null), 2000);
+      setLoading(false);
+      return;
+    }
+    try {
+      const sys = "Tu classes une idée capturée rapidement pour une session de travail. Réponds UNIQUEMENT avec un seul mot: ETAPE ou PARKING";
+      const content = `Objectif de session: ${session.objective}\n\nIdée capturée: ${t}`;
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      const d = await res.json();
+      const verdict = (d.text || "PARKING").trim().toUpperCase();
+      if (verdict.includes("ETAPE") || verdict.includes("ÉTAPE")) {
+        await onAddStep(t);
+        setFeedback("✅ Ajouté aux étapes");
+      } else {
+        await onAddToParkingLot(t);
+        setFeedback("🅿️ Ajouté au parking lot");
+      }
+    } catch {
+      await onAddToParkingLot(t);
+      setFeedback("🅿️ Ajouté au parking lot");
+    }
+    setTimeout(() => setFeedback(null), 2000);
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "white", borderTop: "2px solid #e2defc", padding: "8px 1rem", zIndex: 200, display: "flex", gap: 8, alignItems: "center" }}>
+      {feedback && (
+        <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", background: "#1a1528", color: "white", borderRadius: 8, padding: "6px 14px", fontSize: 12, whiteSpace: "nowrap", marginBottom: 4 }}>{feedback}</div>
+      )}
+      <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
+      <input value={text} onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" && text.trim() && !loading) capture(); }}
+        placeholder={session ? "Capture rapide — Entrée pour ajouter..." : "Capture rapide (sans session = note)"}
+        style={{ flex: 1, fontSize: 13, border: "1px solid #e2defc", borderRadius: 8, padding: "8px 12px", fontFamily: "inherit", background: "#faf9ff", outline: "none" }} />
+      {text.trim() && (
+        <button onClick={capture} disabled={loading}
+          style={{ background: loading ? "#b8b0e8" : "#534AB7", color: "white", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+          {loading ? "…" : "+"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // TAB ANCRE — FEATURE PRINCIPALE
 // ─────────────────────────────────────────────────────────
 function TabAncre({
   session, steps, parkingLot, sessionHistory,
-  sessionLoading, sessionError,
+  sessionLoading, sessionError, elapsed, timerReminder, linkedPrompts,
   onStartSession, onEndSession,
-  onAddStep, onToggleStep, onDeleteStep,
+  onAddStep, onCycleStep, onDeleteStep, onUpdateBlocked,
   onAddToParkingLot, onDeleteParkingLotItem, onClearParkingLot,
 }) {
   const [objective, setObjective] = useState("");
+  const [emotionalState, setEmotionalState] = useState("good");
   const [startLoading, setStartLoading] = useState(false);
   const [startError, setStartError] = useState("");
+  const [expandedPrompt, setExpandedPrompt] = useState(null);
   const [newStep, setNewStep] = useState("");
   const [stepLoading, setStepLoading] = useState(false);
+  const [blockingReason, setBlockingReason] = useState({});
   const [distractText, setDistractText] = useState("");
   const [distractCtx, setDistractCtx] = useState("");
   const [distractResult, setDistractResult] = useState(null);
@@ -796,14 +903,30 @@ function TabAncre({
   const [summaryText, setSummaryText] = useState("");
   const [summaryError, setSummaryError] = useState("");
   const [expandedSummary, setExpandedSummary] = useState(null);
+  const [whereAmILoading, setWhereAmILoading] = useState(false);
+  const [whereAmIText, setWhereAmIText] = useState("");
+  const [whereAmIError, setWhereAmIError] = useState("");
+  // Smart paste
+  const [pasteTarget, setPasteTarget] = useState(null);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteLoading, setPasteLoading] = useState(false);
+  const [pasteError, setPasteError] = useState("");
+  const [pastePreview, setPastePreview] = useState(null);
+  const [pasteConfirmed, setPasteConfirmed] = useState(false);
+  // Natural language adjust
+  const [adjustText, setAdjustText] = useState("");
+  const [adjustLoading, setAdjustLoading] = useState(false);
+  const [adjustResult, setAdjustResult] = useState(null);
+  const [adjustError, setAdjustError] = useState("");
 
-  const completedCount = steps.filter(s => s.completed).length;
+  const completedCount = steps.filter(s => s.state === "done" || s.completed).length;
   const pct = steps.length > 0 ? Math.round(completedCount / steps.length * 100) : 0;
+  const lastSession = sessionHistory.find(s => s.next_session_context);
 
   async function handleStart() {
     if (!objective.trim()) return;
     setStartLoading(true); setStartError("");
-    try { await onStartSession(objective.trim()); }
+    try { await onStartSession(objective.trim(), emotionalState); }
     catch (err) { setStartError((err.message || "Erreur.") + " — réessaye."); }
     setStartLoading(false);
   }
@@ -815,6 +938,76 @@ function TabAncre({
     setStepLoading(false);
   }
 
+  async function handleWhereAmI() {
+    if (!session) return;
+    setWhereAmILoading(true); setWhereAmIText(""); setWhereAmIError("");
+    try {
+      const done = steps.filter(s => s.state === "done" || s.completed).map(s => s.text).join(", ") || "Aucune";
+      const todo = steps.filter(s => s.state !== "done" && !s.completed).map(s => s.text).join(", ") || "Aucune";
+      const sys = "Résume en 2 lignes max où en est l'utilisateur dans sa session de travail. Sois ultra direct.";
+      const content = `Objectif: ${session.objective}\nComplétées: ${done}\nReste: ${todo}`;
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      if (!res.ok) throw new Error("Erreur serveur");
+      const d = await res.json();
+      setWhereAmIText(d.text);
+    } catch (err) { setWhereAmIError(err.message || "Erreur"); }
+    setWhereAmILoading(false);
+  }
+
+  async function handleSmartPaste() {
+    if (!pasteText.trim()) return;
+    setPasteLoading(true); setPasteError(""); setPastePreview(null);
+    try {
+      const sys = `Tu analyses une liste d'éléments et tu les tries pour une session de travail.
+ÉTAPE = action concrète à faire MAINTENANT pendant cette session.
+PARKING = idée future, à faire plus tard, ou pas directement lié à l'objectif.
+Réponds UNIQUEMENT en JSON valide: {"steps":["item"],"parking":["item"]}`;
+      const content = `Objectif de session: ${session?.objective || "Non défini"}\n\nListe à trier:\n${pasteText}`;
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      if (!res.ok) throw new Error("Erreur serveur");
+      const d = await res.json();
+      const clean = d.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setPastePreview({ steps: parsed.steps || [], parking: parsed.parking || [] });
+    } catch (err) { setPasteError("Erreur de tri: " + (err.message || "Réessaie.")); }
+    setPasteLoading(false);
+  }
+
+  function moveItem(from, to, idx) {
+    if (!pastePreview) return;
+    const item = pastePreview[from][idx];
+    setPastePreview(prev => ({
+      ...prev,
+      [from]: prev[from].filter((_, i) => i !== idx),
+      [to]: [...prev[to], item]
+    }));
+  }
+
+  async function confirmPaste() {
+    if (!pastePreview) return;
+    for (const text of pastePreview.steps) await onAddStep(text);
+    for (const content of pastePreview.parking) await onAddToParkingLot(content);
+    setPasteTarget(null); setPasteText(""); setPastePreview(null); setPasteConfirmed(true);
+    setTimeout(() => setPasteConfirmed(false), 3000);
+  }
+
+  async function handleNLAdjust() {
+    if (!adjustText.trim() || !pastePreview) return;
+    setAdjustLoading(true); setAdjustResult(null); setAdjustError("");
+    try {
+      const sys = `Tu appliques des modifications en langage naturel à deux listes (étapes et parking lot).
+Réponds UNIQUEMENT en JSON: {"steps":[...],"parking":[...],"changes":"ce qui a changé en 1 phrase"}`;
+      const content = `Étapes: ${JSON.stringify(pastePreview.steps)}\nParking: ${JSON.stringify(pastePreview.parking)}\nInstruction: ${adjustText}`;
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      if (!res.ok) throw new Error("Erreur serveur");
+      const d = await res.json();
+      const clean = d.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setAdjustResult(parsed);
+    } catch (err) { setAdjustError(err.message || "Erreur"); }
+    setAdjustLoading(false);
+  }
+
   async function handleCheckDistraction() {
     if (!distractText.trim() || !session) return;
     setDistractLoading(true); setDistractResult(null); setDistractError("");
@@ -822,8 +1015,10 @@ function TabAncre({
       const obj = session.objective;
       const sys = "Tu es un coach de focus pour quelqu'un avec TDAH qui développe une app. L'utilisateur a un objectif de session précis. Analyse si le nouveau message de Claude Code est directement lié à cet objectif ou une distraction.\n\nRéponds UNIQUEMENT dans ce format :\n\n🎯 LIÉ ou ⚠️ DISTRACTION\n\nPOURQUOI (1 phrase max, très directe)\n\nQUOI FAIRE :\n[Si LIÉ] : Maintenant ou Après l'objectif principal — explique en 1 phrase\n[Si DISTRACTION] : Copie ce message exact dans Claude Code :\n'---MESSAGE À COPIER---\nMerci, je note ça pour plus tard. Pour l'instant restons concentrés sur : " + obj + ". Peux-tu continuer avec ça ?\n---FIN DU MESSAGE---'\n\nSois ultra direct. Maximum 6 lignes au total.";
       const content = "Objectif : " + obj + "\n\nMessage Claude Code :\n" + distractText + (distractCtx.trim() ? "\n\nContexte : " + distractCtx : "");
-      const r = await callAPI(sys, content);
-      setDistractResult(r);
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      if (!res.ok) throw new Error("Erreur serveur " + res.status);
+      const d = await res.json();
+      setDistractResult(d.text);
     } catch (err) { setDistractError((err.message || "Erreur.") + " — réessaye."); }
     setDistractLoading(false);
   }
@@ -836,32 +1031,156 @@ function TabAncre({
   async function handleEndSession() {
     setSummaryLoading(true); setSummaryError(""); setSummaryText("");
     try {
-      const done = steps.filter(s => s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
-      const todo = steps.filter(s => !s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
+      const done = steps.filter(s => s.state === "done" || s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
+      const todo = steps.filter(s => s.state !== "done" && !s.completed).map(s => "- " + s.text).join("\n") || "Aucune";
       const park = parkingLot.map(p => "- " + p.content).join("\n") || "Aucune";
-      const sys = "Tu résumes des sessions de travail avec Claude Code. Génère en français:\n📋 CE QUI A ÉTÉ ACCOMPLI\n❌ CE QUI RESTE À FAIRE\n🅿️ DISTRACTIONS NOTÉES (à traiter prochaine session)\n⏭️ PROCHAINE ÉTAPE PRIORITAIRE (1 action concrète)";
+      const sys = "Tu résumes des sessions de travail avec Claude Code. Génère en français:\n\n✅ ACCOMPLI\n⬜ RESTE À FAIRE\n🅿️ PARKING LOT\n⏭️ PROCHAINE ACTION PRIORITAIRE (1 action concrète)";
       const content = "Objectif : " + session.objective + "\n\nÉtapes complétées :\n" + done + "\n\nÉtapes non complétées :\n" + todo + "\n\nParking lot :\n" + park;
-      const r = await callAPI(sys, content);
-      setSummaryText(r);
-      await onEndSession(r);
+      const res = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content }) });
+      if (!res.ok) throw new Error("Erreur serveur");
+      const d = await res.json();
+      setSummaryText(d.text);
+      await onEndSession(d.text);
     } catch (err) { setSummaryError((err.message || "Erreur.") + " — réessaye."); }
     setSummaryLoading(false);
   }
 
+  const stateIcon = (s) => {
+    const st = s.state || (s.completed ? "done" : "todo");
+    return st === "done" ? "✅" : st === "blocked" ? "🔴" : "⬜";
+  };
+  const stateLabel = (s) => {
+    const st = s.state || (s.completed ? "done" : "todo");
+    return st === "done" ? "Complétée" : st === "blocked" ? "Bloquée" : "À faire";
+  };
+
   const isDistraction = distractResult && distractResult.includes("⚠️ DISTRACTION");
   const copyMsg = distractResult ? extractCopyMsg(distractResult) : null;
+
+  // ── SMART PASTE MODAL ──
+  if (pasteTarget && !pastePreview) {
+    return (
+      <div style={cs.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <label style={cs.lbl}>📋 COLLER UNE LISTE — Tri automatique IA</label>
+          <button onClick={() => { setPasteTarget(null); setPasteText(""); setPasteError(""); }} style={{ background: "none", border: "none", color: "#7b6fa0", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+        <p style={{ ...cs.tip, marginBottom: 10 }}>Colle n'importe quelle liste — numérotée, à puces, ou texte libre. L'IA va trier ce qui va dans les Étapes vs le Parking lot.</p>
+        <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={8}
+          placeholder={"1. Ajouter le bouton de connexion\n2. Peut-être refactoriser le layout plus tard\n3. Corriger le bug de navigation\n- Idée pour une future fonctionnalité..."}
+          style={cs.ta} />
+        {pasteError && (
+          <div style={{ background: "#fff0f0", border: "1px solid #ffcdd2", borderRadius: 8, padding: "8px 12px", marginTop: 8 }}>
+            <p style={{ fontSize: 13, color: "#c62828", margin: "0 0 6px" }}>❌ {pasteError}</p>
+            <button onClick={handleSmartPaste} style={cs.btnSec}>Réessayer</button>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button onClick={handleSmartPaste} disabled={pasteLoading || !pasteText.trim()} style={{ ...cs.btnMain(pasteLoading || !pasteText.trim()), width: "auto", padding: "11px 22px" }}>
+            {pasteLoading ? "⏳ Tri en cours…" : "🧠 Trier automatiquement"}
+          </button>
+          <button onClick={() => { setPasteTarget(null); setPasteText(""); }} style={cs.btnSec}>Annuler</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PASTE PREVIEW ──
+  if (pastePreview) {
+    return (
+      <div>
+        <div style={cs.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <label style={cs.lbl}>🔍 APERÇU DU TRI — Déplace les items si besoin</label>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: "#059669", margin: "0 0 8px" }}>📋 ÉTAPES ({pastePreview.steps.length})</p>
+              {pastePreview.steps.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", background: "#f0fdf4", borderRadius: 7, marginBottom: 4, border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontSize: 12, color: "#14532d", flex: 1, margin: 0, lineHeight: 1.4 }}>{item}</p>
+                  <button onClick={() => moveItem("steps", "parking", i)} title="Envoyer au parking" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#7b6fa0", flexShrink: 0 }}>→🅿️</button>
+                </div>
+              ))}
+              {pastePreview.steps.length === 0 && <p style={{ fontSize: 12, color: "#9e96c0" }}>Vide</p>}
+            </div>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: "#7c3aed", margin: "0 0 8px" }}>🅿️ PARKING ({pastePreview.parking.length})</p>
+              {pastePreview.parking.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", background: "#faf5ff", borderRadius: 7, marginBottom: 4, border: "1px solid #ddd6fe" }}>
+                  <p style={{ fontSize: 12, color: "#4c1d95", flex: 1, margin: 0, lineHeight: 1.4 }}>{item}</p>
+                  <button onClick={() => moveItem("parking", "steps", i)} title="Envoyer aux étapes" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#7b6fa0", flexShrink: 0 }}>→📋</button>
+                </div>
+              ))}
+              {pastePreview.parking.length === 0 && <p style={{ fontSize: 12, color: "#9e96c0" }}>Vide</p>}
+            </div>
+          </div>
+        </div>
+        <div style={cs.card}>
+          <label style={cs.lbl}>🗣️ MODIFIER QUELQUE CHOSE ? (optionnel)</label>
+          <p style={{ ...cs.tip, marginBottom: 8 }}>Ex: "Met le point 3 dans le parking lot" ou "Le point 2 est urgent"</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={adjustText} onChange={e => setAdjustText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && adjustText.trim()) handleNLAdjust(); }}
+              placeholder="Décris ta modification en français…"
+              style={{ ...cs.ta, resize: "none", height: 38, padding: "8px 11px", flex: 1 }} />
+            <button onClick={handleNLAdjust} disabled={adjustLoading || !adjustText.trim()}
+              style={{ background: adjustLoading || !adjustText.trim() ? "#b8b0e8" : "#534AB7", color: "white", border: "none", borderRadius: 9, padding: "8px 14px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+              {adjustLoading ? "…" : "Appliquer"}
+            </button>
+          </div>
+          {adjustError && <p style={{ fontSize: 13, color: "#c62828", marginTop: 6 }}>❌ {adjustError} <button onClick={handleNLAdjust} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 13 }}>Réessayer</button></p>}
+          {adjustResult && (
+            <div style={{ background: "#ede9ff", borderRadius: 8, padding: "8px 12px", marginTop: 8 }}>
+              <p style={{ fontSize: 12, color: "#534AB7", margin: "0 0 6px" }}>📝 {adjustResult.changes}</p>
+              <button onClick={() => { setPastePreview({ steps: adjustResult.steps, parking: adjustResult.parking }); setAdjustResult(null); setAdjustText(""); }} style={{ ...cs.btnSec, fontSize: 12 }}>Appliquer les changements</button>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={confirmPaste} style={{ ...cs.btnMain(false), flex: 1 }}>✅ Confirmer et ajouter tout</button>
+          <button onClick={() => { setPastePreview(null); setPasteTarget(null); setPasteText(""); }} style={cs.btnSec}>✗ Annuler</button>
+        </div>
+      </div>
+    );
+  }
 
   // ── NO SESSION ──
   if (!session) {
     return (
       <div>
+        {pasteConfirmed && <div style={{ ...cs.card, background: "#f0fdf4", border: "1px solid #86efac" }}><p style={{ fontSize: 13, color: "#15803d", margin: 0 }}>✅ Éléments ajoutés avec succès !</p></div>}
+        {lastSession?.next_session_context && (
+          <div style={{ ...cs.card, background: "#ede9ff", border: "1px solid #c5bff5" }}>
+            <label style={{ ...cs.lbl, color: "#534AB7" }}>⏭️ REPRENDRE OÙ TU T'AS ARRÊTÉ</label>
+            <pre style={{ ...cs.pre, fontSize: 12, marginBottom: 10 }}>{lastSession.next_session_context.slice(0, 300)}</pre>
+            <button onClick={() => {
+              const match = lastSession.next_session_context.match(/⏭️[^\n]*\n([^\n]+)/);
+              setObjective(match ? match[1].trim() : lastSession.objective || "");
+            }} style={{ ...cs.btnSec, fontSize: 12 }}>Utiliser comme objectif</button>
+          </div>
+        )}
         <div style={cs.card}>
           <h2 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 700, color: "#1a1528" }}>🎯 Ancre de session</h2>
-          <p style={{ ...cs.tip, marginBottom: 14 }}>Définis un objectif précis avant de commencer. Ça t'aide à rester concentré sur l'essentiel.</p>
-          <label style={cs.lbl}>MON OBJECTIF DE SESSION</label>
+          <p style={{ ...cs.tip, marginBottom: 14 }}>Définis ton état et ton objectif avant de commencer.</p>
+          <label style={cs.lbl}>COMMENT TU TE SENS ?</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[["good", "🟢 En forme"], ["tired", "🟡 Fatigué"], ["overwhelmed", "🔴 Dépassé"]].map(([st, lbl]) => (
+              <button key={st} onClick={() => setEmotionalState(st)}
+                style={{ background: emotionalState === st ? "#534AB7" : "transparent", color: emotionalState === st ? "white" : "#534AB7", border: "1px solid #c5bff5", borderRadius: 8, padding: "8px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flex: 1, transition: "all .12s" }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <label style={cs.lbl}>MON OBJECTIF DE SESSION *</label>
           <textarea value={objective} onChange={e => setObjective(e.target.value)} rows={3}
-            placeholder="Qu'est-ce que tu veux accomplir aujourd'hui ? Ex: Ajouter l'écran de profil avec photo et nom modifiable"
+            placeholder="Qu'est-ce que tu veux accomplir ? Ex: Ajouter l'écran de profil avec photo et nom modifiable"
             style={cs.ta} onKeyDown={e => e.ctrlKey && e.key === "Enter" && handleStart()} />
+          {emotionalState === "overwhelmed" && (
+            <p style={{ fontSize: 12, color: "#7c3aed", marginTop: 6, padding: "6px 10px", background: "#faf5ff", borderRadius: 7, border: "1px solid #ddd6fe" }}>
+              🧡 Mode Dépassé activé — Claude va décomposer ton objectif en sous-étapes très petites automatiquement.
+            </p>
+          )}
           {startError && (
             <p style={{ color: "#ef4444", fontSize: 13, marginTop: 6 }}>
               {startError} <button onClick={handleStart} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", fontSize: 13, textDecoration: "underline" }}>Réessayer</button>
@@ -881,11 +1200,19 @@ function TabAncre({
   // ── ACTIVE SESSION ──
   return (
     <div>
-      {/* Objectif verrouillé + progression */}
+      {/* Objectif + progression + timer */}
       <div style={{ ...cs.card, background: "#f0fdf4", border: "2px solid #86efac" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1 }}>
-            <label style={{ ...cs.lbl, color: "#15803d" }}>🎯 OBJECTIF EN COURS</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+              <label style={{ ...cs.lbl, color: "#15803d", margin: 0 }}>🎯 OBJECTIF EN COURS</label>
+              {elapsed && elapsed !== "00:00" && (
+                <span style={{ fontSize: 11, color: "#059669", background: "#dcfce7", padding: "1px 8px", borderRadius: 99 }}>⏱ {elapsed}</span>
+              )}
+              {session.emotional_state === "overwhelmed" && (
+                <span style={{ fontSize: 11, color: "#7c3aed", background: "#faf5ff", padding: "1px 8px", borderRadius: 99, border: "1px solid #ddd6fe" }}>🔴 Mode doux</span>
+              )}
+            </div>
             <p style={{ fontSize: 14, fontWeight: 600, color: "#14532d", margin: 0, lineHeight: 1.5 }}>{session.objective}</p>
           </div>
           {!endConfirm && (
@@ -895,7 +1222,7 @@ function TabAncre({
         {steps.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 12, color: "#15803d" }}>{completedCount}/{steps.length} étapes complétées</span>
+              <span style={{ fontSize: 12, color: "#15803d" }}>{completedCount}/{steps.length} étapes</span>
               <span style={{ fontSize: 12, color: "#15803d" }}>{pct}%</span>
             </div>
             <div style={{ background: "#dcfce7", borderRadius: 99, height: 7 }}>
@@ -903,9 +1230,17 @@ function TabAncre({
             </div>
           </div>
         )}
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <button onClick={handleWhereAmI} disabled={whereAmILoading}
+            style={{ ...cs.btnSec, fontSize: 12, opacity: whereAmILoading ? 0.6 : 1 }}>
+            {whereAmILoading ? "⏳…" : "📍 Où j'en étais ?"}
+          </button>
+        </div>
+        {whereAmIError && <p style={{ fontSize: 12, color: "#c62828", margin: "6px 0 0" }}>❌ {whereAmIError} <button onClick={handleWhereAmI} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 12 }}>Réessayer</button></p>}
+        {whereAmIText && <div style={{ marginTop: 8, background: "#dcfce7", borderRadius: 8, padding: "8px 12px" }}><pre style={{ ...cs.pre, fontSize: 12, color: "#14532d" }}>{whereAmIText}</pre></div>}
       </div>
 
-      {/* Confirmation fin de session */}
+      {/* Fin de session */}
       {endConfirm && (
         <div style={{ ...cs.card, border: "2px solid #fca5a5", background: "#fff1f2" }}>
           {summaryLoading ? (
@@ -922,7 +1257,7 @@ function TabAncre({
           ) : (
             <>
               <p style={{ fontSize: 14, color: "#dc2626", fontWeight: 600, margin: "0 0 8px" }}>Terminer et résumer la session ?</p>
-              <p style={{ ...cs.tip, marginBottom: 10 }}>Un résumé sera généré avec tes étapes et le parking lot.</p>
+              <p style={{ ...cs.tip, marginBottom: 10 }}>Un résumé structuré sera généré et sauvegardé pour ta prochaine session.</p>
               {summaryError && (
                 <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>
                   {summaryError} <button onClick={handleEndSession} style={{ color: "#534AB7", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: 13 }}>Réessayer</button>
@@ -941,7 +1276,11 @@ function TabAncre({
 
       {/* Étapes */}
       <div style={cs.card}>
-        <label style={cs.lbl}>📋 ÉTAPES DE L'OBJECTIF</label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <label style={{ ...cs.lbl, margin: 0 }}>📋 ÉTAPES DE L'OBJECTIF</label>
+          <button onClick={() => { setPasteTarget("steps"); setPasteText(""); setPastePreview(null); setPasteError(""); }}
+            style={{ ...cs.btnSec, fontSize: 11, padding: "4px 10px" }}>📋 Coller une liste</button>
+        </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <input value={newStep} onChange={e => setNewStep(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddStep()}
             placeholder="Ajouter une étape… (Entrée pour valider)"
@@ -951,22 +1290,52 @@ function TabAncre({
             {stepLoading ? "…" : "+"}
           </button>
         </div>
-        {steps.length === 0 && <p style={cs.tip}>Aucune étape — décompose ton objectif en sous-tâches pour suivre ta progression.</p>}
+        {steps.length === 0 && <p style={cs.tip}>Aucune étape — décompose ton objectif en sous-tâches.</p>}
         {steps.map(step => {
           const lid = step._lid || step.id;
+          const st = step.state || (step.completed ? "done" : "todo");
+          const isBlocked = st === "blocked";
+          const isDone = st === "done";
+          const hasLinked = linkedPrompts && linkedPrompts[String(lid)];
           return (
-            <div key={lid} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid #f0eeff" }}>
-              <input type="checkbox" checked={!!step.completed} onChange={() => onToggleStep(lid)}
-                style={{ marginTop: 3, accentColor: "#534AB7", flexShrink: 0, width: 16, height: 16, cursor: "pointer" }} />
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontSize: 14, color: step.completed ? "#9e96c0" : "#1a1528", textDecoration: step.completed ? "line-through" : "none", lineHeight: 1.4 }}>{step.text}</p>
-                {step.completed && step.completed_at && (
-                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "#9e96c0" }}>
-                    ✓ {new Date(step.completed_at).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                )}
+            <div key={lid} style={{ padding: "10px 0", borderBottom: "1px solid #f0eeff" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <button onClick={() => onCycleStep(lid)} title={`État: ${stateLabel(step)} — cliquer pour changer`}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, flexShrink: 0, padding: 0, lineHeight: 1 }}>
+                  {stateIcon(step)}
+                </button>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: 14, color: isDone ? "#9e96c0" : isBlocked ? "#dc2626" : "#1a1528", textDecoration: isDone ? "line-through" : "none", lineHeight: 1.4 }}>{step.text}</p>
+                  {isDone && step.completed_at && (
+                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#9e96c0" }}>
+                      ✓ {new Date(step.completed_at).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  )}
+                  {isBlocked && (
+                    <input value={blockingReason[lid] || step.blocked_reason || ""}
+                      onChange={e => {
+                        setBlockingReason(prev => ({ ...prev, [lid]: e.target.value }));
+                      }}
+                      onBlur={e => { if (e.target.value !== step.blocked_reason) onUpdateBlocked(lid, e.target.value); }}
+                      placeholder="Bloqué par quoi ?"
+                      style={{ ...cs.ta, fontSize: 12, marginTop: 6, padding: "5px 9px", height: "auto", resize: "none", borderColor: "#fca5a5", background: "#fff1f2" }} />
+                  )}
+                  {hasLinked && expandedPrompt === lid && (
+                    <div style={{ marginTop: 8, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "8px 12px" }}>
+                      <pre style={{ ...cs.pre, fontSize: 12 }}>{linkedPrompts[String(lid)]}</pre>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  {hasLinked && (
+                    <button onClick={() => setExpandedPrompt(expandedPrompt === lid ? null : lid)}
+                      title="Voir le prompt lié" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}>
+                      📎
+                    </button>
+                  )}
+                  <button onClick={() => onDeleteStep(lid)} style={{ ...cs.btnRed, padding: "3px 9px", fontSize: 12 }}>✕</button>
+                </div>
               </div>
-              <button onClick={() => onDeleteStep(lid)} style={{ ...cs.btnRed, padding: "3px 9px", fontSize: 12, flexShrink: 0 }}>✕</button>
             </div>
           );
         })}
@@ -1013,24 +1382,28 @@ function TabAncre({
       <div style={cs.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
           <label style={{ ...cs.lbl, margin: 0 }}>
-            🅿️ PARKING LOT — À FAIRE PLUS TARD
+            🅿️ PARKING LOT
             {parkingLot.length > 0 && <span style={{ background: "#534AB7", color: "white", borderRadius: 99, fontSize: 10, padding: "1px 6px", marginLeft: 6 }}>{parkingLot.length}</span>}
           </label>
-          {parkingLot.length > 0 && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => navigator.clipboard.writeText(parkingLot.map((p, i) => (i+1) + ". " + p.content).join("\n"))} style={{ ...cs.btnSec, fontSize: 11, padding: "5px 10px" }}>📋 Tout copier</button>
-              {clearParkConfirm ? (
-                <>
-                  <button onClick={() => { onClearParkingLot(); setClearParkConfirm(false); }} style={cs.btnRed}>Confirmer</button>
-                  <button onClick={() => setClearParkConfirm(false)} style={cs.btnSec}>Annuler</button>
-                </>
-              ) : (
-                <button onClick={() => setClearParkConfirm(true)} style={cs.btnRed}>🗑️ Vider</button>
-              )}
-            </div>
-          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button onClick={() => { setPasteTarget("parking"); setPasteText(""); setPastePreview(null); setPasteError(""); }}
+              style={{ ...cs.btnSec, fontSize: 11, padding: "4px 10px" }}>📋 Coller une liste</button>
+            {parkingLot.length > 0 && (
+              <>
+                <button onClick={() => navigator.clipboard.writeText(parkingLot.map((p, i) => (i+1) + ". " + p.content).join("\n"))} style={{ ...cs.btnSec, fontSize: 11, padding: "5px 10px" }}>📋 Tout copier</button>
+                {clearParkConfirm ? (
+                  <>
+                    <button onClick={() => { onClearParkingLot(); setClearParkConfirm(false); }} style={cs.btnRed}>Confirmer</button>
+                    <button onClick={() => setClearParkConfirm(false)} style={cs.btnSec}>Annuler</button>
+                  </>
+                ) : (
+                  <button onClick={() => setClearParkConfirm(true)} style={cs.btnRed}>🗑️ Vider</button>
+                )}
+              </>
+            )}
+          </div>
         </div>
-        {parkingLot.length === 0 && <p style={cs.tip}>Aucune distraction notée — le parking lot est vide.</p>}
+        {parkingLot.length === 0 && <p style={cs.tip}>Parking lot vide — les distractions et idées futures apparaissent ici.</p>}
         {parkingLot.map(item => {
           const lid = item._lid || item.id;
           const time = new Date(item.created_at).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
@@ -1080,6 +1453,10 @@ export default function Transformateur() {
   const [sessionHistory, setSessionHistory] = useState([]);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionError, setSessionError] = useState(null);
+  const [linkedPrompts, setLinkedPrompts] = useState(() => load("za_linked_prompts", {}));
+  const [celebrationState, setCelebrationState] = useState(null);
+  const [elapsed, setElapsed] = useState("00:00");
+  const [timerReminder, setTimerReminder] = useState(null);
 
   useEffect(() => save("za_lang", lang), [lang]);
   useEffect(() => save("za_project_mode", projectMode), [projectMode]);
@@ -1087,6 +1464,29 @@ export default function Transformateur() {
   useEffect(() => { save("za_session", session); }, [session]);
   useEffect(() => { save("za_steps", steps); }, [steps]);
   useEffect(() => { save("za_parking_lot", parkingLot); }, [parkingLot]);
+  useEffect(() => { save("za_linked_prompts", linkedPrompts); }, [linkedPrompts]);
+
+  // Timer
+  useEffect(() => {
+    if (!session) { setElapsed("00:00"); setTimerReminder(null); return; }
+    const startTime = new Date(session.started_at_timer || session.started_at || session.created_at).getTime();
+    const tick = () => {
+      const diff = Math.floor((Date.now() - startTime) / 1000);
+      const h = Math.floor(diff / 3600);
+      const m = Math.floor((diff % 3600) / 60);
+      const s = diff % 60;
+      setElapsed(h > 0 ? `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}` : `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+      if (diff >= 900) {
+        const noDone = steps.every(s => s.state !== "done" && !s.completed);
+        const firstTodo = steps.find(s => s.state !== "done" && !s.completed);
+        if (noDone && firstTodo) setTimerReminder(firstTodo.text);
+        else setTimerReminder(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [session, steps]);
 
   const projectCtx = projectMode === "zenalpha"
     ? "The user is building ZenAlpha, a React Native/Expo app designed for someone with ADHD."
@@ -1132,28 +1532,44 @@ export default function Transformateur() {
     } catch (err) { setSessionError(err.message); }
   }
 
-  async function startSession(objective) {
+  async function startSession(objective, emotional_state = "good") {
     setSessionLoading(true); setSessionError(null);
-    const local = { id: null, objective, started_at: new Date().toISOString(), status: "active" };
+    const local = { id: null, objective, emotional_state, started_at: new Date().toISOString(), started_at_timer: new Date().toISOString(), status: "active" };
     setSession(local);
     try {
-      const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective }) });
+      const res = await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, emotional_state }) });
       if (!res.ok) throw new Error("Erreur serveur " + res.status);
       const data = await res.json();
       setSession(data);
+      // If overwhelmed, auto-break objective into smaller steps
+      if (emotional_state === "overwhelmed") {
+        try {
+          const sys = "Tu décomposes un objectif de travail en sous-étapes très petites et concrètes pour quelqu'un qui se sent dépassé. Maximum 5 étapes. Réponds UNIQUEMENT avec un JSON: {"steps":["étape 1","étape 2",...]}";
+          const r = await fetch("/api/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: sys, content: "Objectif: " + objective }) });
+          if (r.ok) {
+            const d = await r.json();
+            const clean = d.text.replace(/```json\n?/g,"").replace(/```\n?/g,"").trim();
+            const parsed = JSON.parse(clean);
+            for (const text of (parsed.steps || [])) {
+              await addStep(text);
+            }
+          }
+        } catch {}
+      }
     } catch (err) { setSessionError("Supabase indisponible — session sauvegardée localement. " + err.message); }
     setSessionLoading(false);
   }
 
   async function endSession(summary) {
-    const updates = { status: "completed", completed_at: new Date().toISOString(), summary };
+    const updates = { status: "completed", completed_at: new Date().toISOString(), summary, next_session_context: summary };
     const finished = session ? { ...session, ...updates } : null;
     if (session?.id) {
       try { await fetch("/api/sessions/" + session.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) }); } catch {}
     }
     if (finished) setSessionHistory(prev => [finished, ...prev.filter(s => s.id !== finished.id)].slice(0, 5));
-    setSession(null); setSteps([]); setParkingLot([]);
-    save("za_session", null); save("za_steps", []); save("za_parking_lot", []);
+    setSession(null); setSteps([]); setParkingLot([]); setLinkedPrompts({});
+    save("za_session", null); save("za_steps", []); save("za_parking_lot", []); save("za_linked_prompts", {});
+    setTimerReminder(null); setElapsed("00:00");
   }
 
   async function addStep(text) {
@@ -1168,15 +1584,45 @@ export default function Transformateur() {
     }
   }
 
-  async function toggleStep(lid) {
+  async function cycleStepState(lid) {
     const step = steps.find(s => (s._lid || s.id) === lid);
     if (!step) return;
-    const completed = !step.completed;
+    const cur = step.state || (step.completed ? "done" : "todo");
+    const next = cur === "todo" ? "blocked" : cur === "blocked" ? "done" : "todo";
+    const completed = next === "done";
     const completed_at = completed ? new Date().toISOString() : null;
-    setSteps(prev => prev.map(s => (s._lid || s.id) === lid ? { ...s, completed, completed_at } : s));
-    if (step.id) {
-      try { await fetch("/api/steps/" + step.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed, completed_at }) }); } catch {}
+    setSteps(prev => prev.map(s => (s._lid || s.id) === lid ? { ...s, state: next, completed, completed_at } : s));
+    if (next === "done") {
+      const doneCount = steps.filter(s => (s._lid || s.id) !== lid && (s.state === "done" || s.completed)).length + 1;
+      setCelebrationState({ stepText: step.text, done: doneCount, total: steps.length });
+      setTimeout(() => setCelebrationState(null), 4000);
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [523, 659, 784].forEach((freq, i) => {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine";
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.2, ctx.currentTime + i * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.12 + 0.3);
+          osc.start(ctx.currentTime + i * 0.12); osc.stop(ctx.currentTime + i * 0.12 + 0.35);
+        });
+      } catch {}
     }
+    if (step.id) {
+      try { await fetch("/api/steps/" + step.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: next, completed, completed_at }) }); } catch {}
+    }
+  }
+
+  async function updateStepBlocked(lid, blocked_reason) {
+    setSteps(prev => prev.map(s => (s._lid || s.id) === lid ? { ...s, blocked_reason } : s));
+    const step = steps.find(s => (s._lid || s.id) === lid);
+    if (step?.id) {
+      try { await fetch("/api/steps/" + step.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blocked_reason }) }); } catch {}
+    }
+  }
+
+  function linkPromptToStep(lid, promptText) {
+    setLinkedPrompts(prev => ({ ...prev, [String(lid)]: promptText }));
   }
 
   async function deleteStep(lid) {
@@ -1222,7 +1668,10 @@ export default function Transformateur() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f4ff", fontFamily: "system-ui,sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f5f4ff", fontFamily: "system-ui,sans-serif", paddingBottom: 56 }}>
+      <style>{`@keyframes victorybounce{0%{transform:translateX(-50%) scale(0.7);opacity:0}60%{transform:translateX(-50%) scale(1.08)}100%{transform:translateX(-50%) scale(1);opacity:1}}`}</style>
+      <VictoryBanner state={celebrationState} />
+      <QuickCapture session={session} steps={steps} onAddStep={addStep} onAddToParkingLot={addToParkingLot} />
       <div style={{ background: "#534AB7", padding: "0.75rem 1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <p style={{ fontSize: 13, color: "#c4b5fd", margin: 0 }}>
           {projectMode === "zenalpha" ? "🏗️ ZenAlpha" : "🌐 Autre projet"} · {master ? "✓ MASTER.md" : "⚠️ sans MASTER.md"} · {lang === "en" ? "English" : "Français"}
@@ -1278,7 +1727,7 @@ export default function Transformateur() {
           </div>
         </div>
       )}
-      {session && <SessionBanner session={session} steps={steps} onGoToAncre={() => setTab("ancre")} />}
+      {session && <SessionBanner session={session} steps={steps} elapsed={elapsed} timerReminder={timerReminder} onGoToAncre={() => setTab("ancre")} />}
       <div style={{ background: "white", borderBottom: "1px solid #e2defc", overflowX: "auto" }}>
         <div style={{ display: "flex", padding: "0 1rem", minWidth: "max-content" }}>
           {TABS.map(t => (
@@ -1293,8 +1742,8 @@ export default function Transformateur() {
         </div>
       </div>
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
-        {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onToggleStep={toggleStep} onDeleteStep={deleteStep} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
-        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} />}
+        {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} elapsed={elapsed} timerReminder={timerReminder} linkedPrompts={linkedPrompts} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onCycleStep={cycleStepState} onDeleteStep={deleteStep} onUpdateBlocked={updateStepBlocked} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
+        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} />}
         {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} />}
         {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} />}

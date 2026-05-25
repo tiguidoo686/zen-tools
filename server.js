@@ -130,9 +130,9 @@ app.get("/api/history/test", async (req, res) => {
 
 app.post("/api/sessions", async (req, res) => {
   try {
-    const { objective } = req.body;
+    const { objective, emotional_state } = req.body;
     console.log("[sessions] Creating:", (objective || "").slice(0, 50));
-    const { data, error } = await supabase.from("zen_sessions").insert({ objective, status: "active" }).select().single();
+    const { data, error } = await supabase.from("zen_sessions").insert({ objective, status: "active", emotional_state }).select().single();
     console.log("[sessions] Response:", JSON.stringify({ data: data?.id, error }));
     if (error) throw error;
     res.json(data);
@@ -157,8 +157,8 @@ app.patch("/api/sessions/:id", async (req, res) => {
 
 app.post("/api/steps", async (req, res) => {
   try {
-    const { session_id, text } = req.body;
-    const { data, error } = await supabase.from("zen_steps").insert({ session_id, text, completed: false }).select().single();
+    const { session_id, text, state = "todo", blocked_reason = null } = req.body;
+    const { data, error } = await supabase.from("zen_steps").insert({ session_id, text, completed: false, state, blocked_reason }).select().single();
     if (error) throw error;
     res.json(data);
   } catch (err) { console.log("[steps] Create error:", err.message); res.status(500).json({ error: err.message }); }
