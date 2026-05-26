@@ -350,6 +350,54 @@ Si aucune action manuelle: {"actions": []}`;
   } catch (err) { console.log("[actions/detect] error:", err.message); res.status(500).json({ error: err.message, actions: [] }); }
 });
 
+app.post("/api/analyze-response", async (req, res) => {
+  try {
+    const { content, context } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: "Contenu requis" });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    const sys = `Tu es un assistant expert pour ZenAlpha, une app React Native de gestion de construction utilisee par Guillaume au Quebec.
+Il te colle une reponse de Claude Code. Analyse ce qu'elle contient.
+
+Reponds UNIQUEMENT en JSON valide avec cette structure exacte:
+{
+  "done": ["element clairement confirme comme complete"],
+  "incomplete": ["element mentionne mais pas finalise ou qui manque des details"],
+  "missing": ["element attendu mais absent de la reponse"],
+  "next_recommendation": "Une seule action concrete et courte a faire maintenant (max 2 phrases)"
+}
+
+Regles:
+- done: confirme explicitement par la reponse
+- incomplete: partiellement traite ou sous-entendu
+- missing: aurait du etre la mais ne l est pas
+- next_recommendation: concrete, actionnable, en francais
+- Maximum 6 items par liste
+- Toujours en francais`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500, system: sys, messages: [{ role: "user", content: content.slice(0, 8000) }] })
+    });
+    const d = await response.json();
+    if (!response.ok) throw new Error(d?.error?.message || "Erreur Haiku");
+    const raw = (d.content || []).map(b => b.text || "").join("");
+    let result;
+    try {
+      result = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+    } catch {
+      result = { done: [], incomplete: [], missing: ["Impossible de parser la reponse"], next_recommendation: "Reessaie avec une reponse plus courte ou plus structuree." };
+    }
+
+    try {
+      await supabase.from("zen_tools_history").insert({ prompt: content.slice(0, 200), result: JSON.stringify(result) });
+    } catch {}
+
+    res.json(result);
+  } catch (err) { console.log("[analyze-response] error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 app.get("/api/test-records", async (req, res) => {
   try {
     const { data: sessions, error: se } = await supabase.from("zen_sessions")

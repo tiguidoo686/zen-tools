@@ -474,10 +474,118 @@ function TestHistory({ history, loading }) {
   );
 }
 
+// ─── AnalyserView ─────────────────────────────────────────────────────────────
+function AnalyserView() {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [inputError, setInputError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function analyse() {
+    if (!input.trim()) { setInputError("Colle une réponse Claude ici d'abord"); return; }
+    setInputError(""); setLoading(true); setError(""); setResult(null);
+    try {
+      const res = await fetch("/api/analyze-response", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: input }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur serveur");
+      setResult(data);
+    } catch (e) { setError(e.message || "Erreur de connexion — réessaie"); }
+    setLoading(false);
+  }
+
+  function clear() { setInput(""); setResult(null); setError(""); setInputError(""); setCopied(false); }
+
+  function copy() {
+    if (!result?.next_recommendation) return;
+    navigator.clipboard.writeText(result.next_recommendation).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const Section = ({ icon, color, bg, border, title, items }) => {
+    if (!items?.length) return null;
+    return (
+      <div style={{ ...cs.card, background: bg, border: `1px solid ${border}`, marginBottom: 10 }}>
+        <label style={{ ...cs.lbl, color }}>{icon} {title} — {items.length}</label>
+        {items.map((item, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, marginBottom: i < items.length - 1 ? 6 : 0 }}>
+            <span style={{ color, flexShrink: 0, marginTop: 1 }}>{icon}</span>
+            <p style={{ fontSize: 13, color: "#1a1528", margin: 0, lineHeight: 1.5 }}>{item}</p>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ ...cs.card, background: "#f5f4ff", border: "1px solid #c5bff5", marginBottom: 10 }}>
+        <p style={{ fontSize: 13, color: "#534AB7", margin: 0, lineHeight: 1.5 }}>
+          📋 Colle ici la réponse complète de Claude Code — je t'indique ce qui est fait, ce qui manque, et quoi faire ensuite.
+        </p>
+      </div>
+
+      <div style={cs.card}>
+        <label style={cs.lbl}>RÉPONSE CLAUDE CODE</label>
+        <textarea
+          value={input}
+          onChange={e => { setInput(e.target.value); if (inputError) setInputError(""); }}
+          rows={10}
+          placeholder="Colle ici la réponse de Claude Code..."
+          style={{ ...cs.ta, border: inputError ? "1px solid #dc2626" : "1px solid #ddd9f5" }}
+        />
+        {inputError && <p style={{ fontSize: 12, color: "#dc2626", margin: "4px 0 0" }}>⚠️ {inputError}</p>}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={analyse} disabled={loading}
+          style={{ ...cs.btn(loading), flex: 1, fontSize: 15 }}>
+          {loading ? "⏳ Analyse en cours..." : "🔍 Analyser"}
+        </button>
+        {(result || input) && (
+          <button onClick={clear} style={cs.btnSec}>Vider</button>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #fca5a5" }}>
+          <p style={{ fontSize: 13, color: "#dc2626", margin: 0 }}>❌ {error}</p>
+        </div>
+      )}
+
+      {result && (
+        <div>
+          <Section icon="✅" color="#15803d" bg="#f0fdf4" border="#bbf7d0" title="CE QUI A ÉTÉ FAIT" items={result.done} />
+          <Section icon="⚠️" color="#92400e" bg="#fffbeb" border="#fde68a" title="INCOMPLET OU PARTIEL" items={result.incomplete} />
+          <Section icon="❌" color="#dc2626" bg="#fff0f0" border="#fca5a5" title="PAS FAIT DU TOUT" items={result.missing} />
+          {result.next_recommendation && (
+            <div style={{ ...cs.card, background: "#f5f4ff", border: "2px solid #534AB7", marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={{ ...cs.lbl, color: "#534AB7", margin: 0 }}>💡 RECOMMANDATION SUIVANTE</label>
+                <button onClick={copy}
+                  style={{ ...cs.btnSec, fontSize: 12, padding: "4px 12px", background: copied ? "#f0fdf4" : undefined, color: copied ? "#16a34a" : undefined }}>
+                  {copied ? "✓ Copié" : "Copier"}
+                </button>
+              </div>
+              <p style={{ fontSize: 14, color: "#1a1528", margin: 0, lineHeight: 1.6, fontWeight: 500 }}>{result.next_recommendation}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main TestLab ─────────────────────────────────────────────────────────────
 export default function TestLab() {
   const [testMode, setTestMode] = useState("sandbox");
-  const [view, setView] = useState("generator");
+  const [view, setView] = useState("analyzer");
   const [pendingMode, setPendingMode] = useState(null);
   const [modal, setModal] = useState(null);
 
@@ -605,6 +713,7 @@ export default function TestLab() {
   }
 
   const VIEWS = [
+    { id: "analyzer", label: "🧪 Analyser" },
     { id: "generator", label: "📋 Générer" },
     { id: "prebuild", label: "🚦 Pre-Build" },
     { id: "whatbroke", label: "🔍 Debug Rapide" },
@@ -630,6 +739,9 @@ export default function TestLab() {
 
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.25rem 1rem" }}>
         <ModeSelector mode={testMode} onModeChange={handleModeChange} />
+
+        {/* ── ANALYSER VIEW ── */}
+        {view === "analyzer" && <AnalyserView />}
 
         {/* ── GENERATOR VIEW ── */}
         {view === "generator" && !runnerMode && !showReport && (
