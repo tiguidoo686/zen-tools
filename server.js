@@ -221,6 +221,58 @@ app.delete("/api/parking/:id", async (req, res) => {
   } catch (err) { console.log("[parking] Delete error:", err.message); res.status(500).json({ error: err.message }); }
 });
 
+// ── Test Lab ──
+
+app.post("/api/test-checklist", async (req, res) => {
+  try {
+    const { module, mode = "sandbox" } = req.body;
+    if (!module) return res.status(400).json({ error: "module requis" });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    const sys = `Tu es un expert QA senior pour ZenAlpha, une application mobile React Native de gestion de construction utilisee par Guillaume, entrepreneur TDAH au Quebec.
+Ton role: generer des checklists de tests EXHAUSTIVES pour le module demande.
+Mode actuel: ${mode === "sandbox" ? "SANDBOX (utiliser prefix [ZEN_TEST] pour toutes les donnees creees)" : mode === "readonly" ? "LECTURE SEULE" : "DRY RUN (simulation uniquement)"}.
+
+Reponds UNIQUEMENT en JSON valide avec cette structure exacte:
+{
+  "module": "nom du module",
+  "categories": [
+    {
+      "id": "ui|logic|save|validation|errors|integration|isolation",
+      "name": "Libelle de la categorie en francais",
+      "items": [
+        { "id": "ui-1", "instruction": "Action concrete que Guillaume doit faire", "expected": "Ce qui doit se passer exactement", "risk": "low|medium|high" }
+      ]
+    }
+  ]
+}
+
+Genere minimum 5 items par categorie. Couvre: chemin heureux, cas limites, erreurs de validation, etat vide, doublons, feedback UI, messages d erreur, scenarios hors ligne, et integrations avec autres modules.
+Marque risk:high pour tout ce qui touche des donnees financieres, la paie, ou la synchronisation avec QuickBooks/Dext.
+Tout test qui creerait des donnees doit specifier que le nom doit commencer par [ZEN_TEST] si mode sandbox.`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 3000, system: sys, messages: [{ role: "user", content: `Genere la checklist de tests complete pour le module: ${module}` }] })
+    });
+    const d = await response.json();
+    if (!response.ok) throw new Error(d?.error?.message || "Erreur Haiku");
+    const raw = (d.content || []).map(b => b.text || "").join("");
+    let checklist;
+    try {
+      checklist = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+    } catch { throw new Error("Reponse non parseable — reessaie"); }
+
+    // Log to history
+    try {
+      await supabase.from("zen_tools_history").insert({ prompt: `[ZEN_TEST] Checklist: ${module}`, result: JSON.stringify(checklist) });
+    } catch {}
+
+    res.json(checklist);
+  } catch (err) { console.log("[test-checklist] error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 // ── User Actions (zen_user_actions) ──
 
 app.post("/api/actions", async (req, res) => {
