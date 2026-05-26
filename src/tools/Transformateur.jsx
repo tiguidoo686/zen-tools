@@ -170,7 +170,7 @@ function useAPI() {
   return { result, setResult, loading, error, run };
 }
 
-function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt, onPromptGenerated }) {
+function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt, onPromptGenerated, onDetectActions }) {
   const [input, setInput] = useState("");
   const [section, setSection] = useState("");
   const [context, setContext] = useState("");
