@@ -87,6 +87,7 @@ const LIBRARY = [
 
 const TABS = [
   { id: "ancre", icon: "🎯", label: "Ancre" },
+  { id: "actions", icon: "⚡", label: "Mes Actions" },
   { id: "transform", icon: "✦", label: "Transformer" },
   { id: "analyze", icon: "🔍", label: "Analyser réponse" },
   { id: "improve", icon: "🔧", label: "Améliorer demande" },
@@ -188,6 +189,7 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt, on
       onAddHistory("✦ Transformer: " + input.slice(0, 80), r);
       if (onPromptGenerated) onPromptGenerated(r);
       setSavedAt(new Date());
+      if (onDetectActions) onDetectActions("transformer", r);
     });
     explain.setResult("");
   }
@@ -319,7 +321,7 @@ function TabTransform({ lang, master, onAddHistory, SYS, steps, onLinkPrompt, on
   );
 }
 
-function TabAnalyze({ lang, onAddHistory, SYS, log, setLog, autoPrompt }) {
+function TabAnalyze({ lang, onAddHistory, SYS, log, setLog, autoPrompt, onDetectActions }) {
   const [origPrompt, setOrigPrompt] = useState(() => load("za_analyze_orig", ""));
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
@@ -349,6 +351,7 @@ function TabAnalyze({ lang, onAddHistory, SYS, log, setLog, autoPrompt }) {
       setLog(prev => [entry, ...prev]);
       setResponse("");
       onAddHistory("🔍 Analyse: " + origPrompt.slice(0, 80), r);
+      if (onDetectActions) onDetectActions("analyser", r);
     } catch (e) { setError(e.message || "Erreur inattendue"); }
     finally { setLoading(false); }
   }
@@ -671,7 +674,7 @@ function AnalyzeLogEntry({ entry, lang, SYS }) {
   );
 }
 
-function TabImprove({ onAddHistory, SYS, log, setLog }) {
+function TabImprove({ onAddHistory, SYS, log, setLog, onDetectActions }) {
   const [bad, setBad] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
@@ -685,6 +688,7 @@ function TabImprove({ onAddHistory, SYS, log, setLog }) {
       const r = await callAPI(SYS.improve, content);
       setLog(prev => [makeEntry("Améliorer demande", bad, r), ...prev]);
       onAddHistory("🔧 Amélioration: " + bad.slice(0, 80), r);
+      if (onDetectActions) onDetectActions("ameliorer", r);
       setBad(""); setContext("");
     } catch (e) { setError(e.message || "Erreur"); }
     setLoading(false);
@@ -712,7 +716,7 @@ function TabImprove({ onAddHistory, SYS, log, setLog }) {
   );
 }
 
-function TabDebug({ onAddHistory, SYS, log, setLog }) {
+function TabDebug({ onAddHistory, SYS, log, setLog, onDetectActions }) {
   const [convo, setConvo] = useState("");
   const [context, setContext] = useState("");
   const [convoType, setConvoType] = useState("zenalpha");
@@ -735,6 +739,7 @@ function TabDebug({ onAddHistory, SYS, log, setLog }) {
       const label = `Debug ${TYPE_LABELS[convoType]}`;
       setLog(prev => [makeEntry(label, convo, r), ...prev]);
       onAddHistory(`💬 Debug ${TYPE_LABELS[convoType]}: ` + convo.slice(0, 80), r);
+      if (onDetectActions) onDetectActions("debugger", r);
       setConvo(""); setContext("");
     } catch (e) { setError(e.message || "Erreur"); }
     setLoading(false);
@@ -778,7 +783,7 @@ function TabDebug({ onAddHistory, SYS, log, setLog }) {
   );
 }
 
-function TabError({ onAddHistory, SYS, log, setLog }) {
+function TabError({ onAddHistory, SYS, log, setLog, onDetectActions }) {
   const [errorText, setErrorText] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
@@ -792,6 +797,7 @@ function TabError({ onAddHistory, SYS, log, setLog }) {
       const r = await callAPI(SYS.explainError, content);
       setLog(prev => [makeEntry("Expliquer erreur", errorText, r), ...prev]);
       onAddHistory("⚠️ Erreur: " + errorText.slice(0, 80), r);
+      if (onDetectActions) onDetectActions("expliquer", r);
       setErrorText(""); setContext("");
     } catch (e) { setSubmitError(e.message || "Erreur"); }
     setLoading(false);
@@ -819,7 +825,7 @@ function TabError({ onAddHistory, SYS, log, setLog }) {
   );
 }
 
-function TabSummary({ onAddHistory, SYS, log, setLog }) {
+function TabSummary({ onAddHistory, SYS, log, setLog, onDetectActions }) {
   const [session, setSession] = useState("");
   const [context, setContext] = useState("");
   const [loading, setLoading] = useState(false);
@@ -833,6 +839,7 @@ function TabSummary({ onAddHistory, SYS, log, setLog }) {
       const r = await callAPI(SYS.sessionSummary, content);
       setLog(prev => [makeEntry("Résumé session", session, r), ...prev]);
       onAddHistory("📋 Résumé de session", r);
+      if (onDetectActions) onDetectActions("resume", r);
       setSession(""); setContext("");
     } catch (e) { setError(e.message || "Erreur"); }
     setLoading(false);
@@ -856,6 +863,127 @@ function TabSummary({ onAddHistory, SYS, log, setLog }) {
       <LogList log={log} onClear={() => setLog([])}>
         {log.map(e => <SimpleLogEntry key={e.id} entry={e} />)}
       </LogList>
+    </div>
+  );
+}
+
+function TabActions({ session, actions, loading, onUpdateStatus, onDelete, onAddManual }) {
+  const [newDesc, setNewDesc] = useState("");
+  const [newPriority, setNewPriority] = useState("normale");
+  const [filter, setFilter] = useState("a_faire");
+
+  const SRC = { transformer: "✦", analyser: "🔍", debugger: "💬", expliquer: "⚠️", resume: "📋", ameliorer: "🔧", manual: "✏️" };
+  const PRIO = {
+    haute: { bg: "#fff0f0", color: "#c62828", border: "#fca5a5", lbl: "⚡ HAUTE" },
+    normale: { bg: "#fffbeb", color: "#92400e", border: "#fde68a", lbl: "🟡 NORMALE" },
+    basse: { bg: "#f0f9ff", color: "#0369a1", border: "#bae6fd", lbl: "🔵 BASSE" },
+  };
+
+  const STATUS_CYCLE = { a_faire: "en_cours", en_cours: "fait", fait: "a_faire" };
+  const afaire = actions.filter(a => a.status === "a_faire");
+  const encours = actions.filter(a => a.status === "en_cours");
+  const fait = actions.filter(a => a.status === "fait");
+  const filtered = filter === "tous" ? actions : actions.filter(a => a.status === filter);
+
+  return (
+    <div>
+      <div style={{ ...cs.card, background: "#faf9ff", border: "1px solid #c5bff5" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <span style={{ fontSize: 24, fontWeight: 800, color: afaire.length > 0 ? "#dc2626" : "#534AB7" }}>{afaire.length}</span>
+            <span style={{ fontSize: 13, color: "#7b6fa0", marginLeft: 6 }}>à faire</span>
+            <span style={{ fontSize: 12, color: "#9e96c0", marginLeft: 12 }}>· {encours.length} en cours · {fait.length} faites</span>
+          </div>
+          {!session && <span style={{ fontSize: 12, color: "#f97316" }}>⚠️ Démarre une session Ancre pour sauvegarder les actions</span>}
+        </div>
+      </div>
+
+      <div style={cs.card}>
+        <label style={cs.lbl}>AJOUTER UNE ACTION MANUELLEMENT</label>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          {[["haute", "⚡ Haute"], ["normale", "🟡 Normale"], ["basse", "🔵 Basse"]].map(([p, lbl]) => (
+            <button key={p} onClick={() => setNewPriority(p)}
+              style={{ background: newPriority === p ? "#534AB7" : "transparent", color: newPriority === p ? "white" : "#534AB7", border: "1px solid #c5bff5", borderRadius: 7, padding: "5px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flex: 1 }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={newDesc} onChange={e => setNewDesc(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && newDesc.trim()) { onAddManual(newDesc.trim(), newPriority); setNewDesc(""); } }}
+            placeholder="Ce que tu dois faire manuellement..."
+            style={{ ...cs.ta, resize: "none", flex: 1, height: 36, padding: "6px 11px" }} />
+          <button onClick={() => { if (newDesc.trim()) { onAddManual(newDesc.trim(), newPriority); setNewDesc(""); } }}
+            disabled={!newDesc.trim()}
+            style={{ ...cs.btnMain(!newDesc.trim()), width: "auto", padding: "6px 18px", fontSize: 13, whiteSpace: "nowrap" }}>
+            + Ajouter
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["a_faire", "À faire", afaire.length], ["en_cours", "En cours", encours.length], ["fait", "Fait", fait.length], ["tous", "Tous", actions.length]].map(([f, lbl, count]) => (
+          <button key={f} onClick={() => setFilter(f)}
+            style={{ background: filter === f ? "#534AB7" : "white", color: filter === f ? "white" : "#534AB7", border: "1px solid #c5bff5", borderRadius: 7, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            {lbl} <span style={{ opacity: 0.75 }}>({count})</span>
+          </button>
+        ))}
+      </div>
+
+      {loading && <p style={{ textAlign: "center", color: "#9e96c0", fontSize: 13 }}>⏳ Détection des actions en cours...</p>}
+
+      {filtered.map(action => {
+        const prio = PRIO[action.priority] || PRIO.normale;
+        const srcIcon = SRC[action.source] || "📌";
+        const lid = action._lid || action.id;
+        return (
+          <div key={lid} style={{ ...cs.card, border: `1px solid ${prio.border}`, background: prio.bg }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <span style={{ fontSize: 20, flexShrink: 0, marginTop: 2 }}>{srcIcon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "#1a1528", margin: "0 0 4px", wordBreak: "break-word" }}>{action.description}</p>
+                {action.context && <p style={{ fontSize: 12, color: "#7b6fa0", margin: "0 0 6px" }}>{action.context}</p>}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: prio.color, background: "rgba(255,255,255,0.6)", border: `1px solid ${prio.border}`, borderRadius: 4, padding: "1px 6px" }}>{prio.lbl}</span>
+                  <span style={{ fontSize: 11, color: "#9e96c0" }}>{srcIcon} {action.source}</span>
+                  {action.due_hint && <span style={{ fontSize: 11, color: "#9e96c0" }}>⏰ {action.due_hint}</span>}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              {action.status === "a_faire" && (
+                <button onClick={() => onUpdateStatus(lid, "en_cours")}
+                  style={{ ...cs.btnSec, fontSize: 12, padding: "5px 12px" }}>▶ En cours</button>
+              )}
+              {action.status === "en_cours" && (
+                <button onClick={() => onUpdateStatus(lid, "a_faire")}
+                  style={{ ...cs.btnSec, fontSize: 12, padding: "5px 12px" }}>⏸ Pause</button>
+              )}
+              {action.status !== "fait" && (
+                <button onClick={() => onUpdateStatus(lid, "fait")}
+                  style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", borderRadius: 7, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Fait</button>
+              )}
+              {action.status === "fait" && (
+                <button onClick={() => onUpdateStatus(lid, "a_faire")}
+                  style={{ ...cs.btnSec, fontSize: 12, padding: "5px 12px" }}>↩ Refaire</button>
+              )}
+              <button onClick={() => onDelete(lid)}
+                style={{ ...cs.btnRed, padding: "5px 12px", fontSize: 12 }}>✕ Supprimer</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {filtered.length === 0 && (
+        <div style={{ ...cs.card, textAlign: "center", color: "#9e96c0", padding: "2rem" }}>
+          <p style={{ fontSize: 15, margin: 0 }}>
+            {filter === "a_faire" ? "✅ Aucune action en attente — tout est géré !" :
+             filter === "en_cours" ? "Rien en cours" :
+             filter === "fait" ? "Rien de complété encore" : "Aucune action enregistrée"}
+          </p>
+          {filter === "a_faire" && !session && <p style={{ fontSize: 12, marginTop: 8 }}>Démarre une session Ancre pour que les actions soient auto-détectées.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1715,6 +1843,8 @@ export default function Transformateur() {
   const [errorLog, setErrorLog] = useState([]);
   const [summaryLog, setSummaryLog] = useState([]);
   const [lastGeneratedPrompt, setLastGeneratedPrompt] = useState(() => load("za_last_prompt", ""));
+  const [userActions, setUserActions] = useState([]);
+  const [actionsDetecting, setActionsDetecting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
   const [transformInput, setTransformInput] = useState("");
@@ -1786,6 +1916,7 @@ export default function Transformateur() {
 
   useEffect(() => { fetchHistory(); }, []);
   useEffect(() => { initSessionHistory(); }, []);
+  useEffect(() => { if (session?.id) fetchUserActions(); }, [session?.id]);
 
 
   async function initSessionHistory() {
@@ -1804,6 +1935,56 @@ export default function Transformateur() {
         } catch {}
       }
     } catch (err) { setSessionError(err.message); }
+  }
+
+  async function fetchUserActions() {
+    if (!session?.id) return;
+    try {
+      const res = await fetch("/api/actions/session/" + session.id);
+      if (res.ok) { const d = await res.json(); setUserActions(Array.isArray(d) ? d : []); }
+    } catch {}
+  }
+
+  async function detectAndSaveActions(source, text) {
+    if (!session?.id || !text) return;
+    setActionsDetecting(true);
+    try {
+      const res = await fetch("/api/actions/detect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: session.id, source, text }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.detected > 0) setUserActions(prev => [...d.actions.map(a => ({ ...a, _lid: a.id })), ...prev]);
+      }
+    } catch {}
+    setActionsDetecting(false);
+  }
+
+  async function updateActionStatus(lid, status) {
+    setUserActions(prev => prev.map(a => (a._lid || a.id) === lid ? { ...a, status } : a));
+    const action = userActions.find(a => (a._lid || a.id) === lid);
+    if (action?.id) {
+      try { await fetch("/api/actions/" + action.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }); } catch {}
+    }
+  }
+
+  async function deleteUserAction(lid) {
+    const action = userActions.find(a => (a._lid || a.id) === lid);
+    setUserActions(prev => prev.filter(a => (a._lid || a.id) !== lid));
+    if (action?.id) { try { await fetch("/api/actions/" + action.id, { method: "DELETE" }); } catch {} }
+  }
+
+  async function addManualAction(description, priority) {
+    const lid = Date.now();
+    const local = { _lid: lid, id: null, session_id: session?.id, source: "manual", description, priority, status: "a_faire", created_at: new Date().toISOString() };
+    setUserActions(prev => [local, ...prev]);
+    if (session?.id) {
+      try {
+        const res = await fetch("/api/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.id, source: "manual", description, priority }) });
+        if (res.ok) { const d = await res.json(); setUserActions(prev => prev.map(a => a._lid === lid ? { ...d, _lid: lid } : a)); }
+      } catch {}
+    }
   }
 
   async function startSession(objective, emotional_state = "good") {
@@ -2011,19 +2192,23 @@ export default function Transformateur() {
               {t.id === "history" && history.length > 0 && (
                 <span style={{ background: "#534AB7", color: "white", borderRadius: 99, fontSize: 10, padding: "1px 6px" }}>{history.length}</span>
               )}
+              {t.id === "actions" && userActions.filter(a => a.status === "a_faire").length > 0 && (
+                <span style={{ background: "#dc2626", color: "white", borderRadius: 99, fontSize: 10, padding: "1px 6px" }}>{userActions.filter(a => a.status === "a_faire").length}</span>
+              )}
             </button>
           ))}
         </div>
       </div>
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "1.5rem 1rem" }}>
         {tab === "ancre" && <TabAncre session={session} steps={steps} parkingLot={parkingLot} sessionHistory={sessionHistory} sessionLoading={sessionLoading} sessionError={sessionError} elapsed={elapsed} timerReminder={timerReminder} linkedPrompts={linkedPrompts} onStartSession={startSession} onEndSession={endSession} onAddStep={addStep} onCycleStep={cycleStepState} onDeleteStep={deleteStep} onUpdateBlocked={updateStepBlocked} onAddToParkingLot={addToParkingLot} onDeleteParkingLotItem={deleteParkingLotItem} onClearParkingLot={clearParkingLot} />}
-        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} onPromptGenerated={setLastGeneratedPrompt} />}
-        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} log={analyzeLog} setLog={setAnalyzeLog} autoPrompt={lastGeneratedPrompt} />}
-        {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} log={improveLog} setLog={setImproveLog} />}
-        {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} log={debugLog} setLog={setDebugLog} />}
-        {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} log={errorLog} setLog={setErrorLog} />}
+        {tab === "actions" && <TabActions session={session} actions={userActions} loading={actionsDetecting} onUpdateStatus={updateActionStatus} onDelete={deleteUserAction} onAddManual={addManualAction} />}
+        {tab === "transform" && <TabTransform lang={lang} master={master} onAddHistory={addToHistory} SYS={SYS} steps={steps} onLinkPrompt={linkPromptToStep} onPromptGenerated={setLastGeneratedPrompt} onDetectActions={detectAndSaveActions} />}
+        {tab === "analyze" && <TabAnalyze lang={lang} onAddHistory={addToHistory} SYS={SYS} log={analyzeLog} setLog={setAnalyzeLog} autoPrompt={lastGeneratedPrompt} onDetectActions={detectAndSaveActions} />}
+        {tab === "improve" && <TabImprove onAddHistory={addToHistory} SYS={SYS} log={improveLog} setLog={setImproveLog} onDetectActions={detectAndSaveActions} />}
+        {tab === "debug" && <TabDebug onAddHistory={addToHistory} SYS={SYS} log={debugLog} setLog={setDebugLog} onDetectActions={detectAndSaveActions} />}
+        {tab === "error" && <TabError onAddHistory={addToHistory} SYS={SYS} log={errorLog} setLog={setErrorLog} onDetectActions={detectAndSaveActions} />}
         {tab === "imageanalyze" && <TabImageAnalyze />}
-        {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} log={summaryLog} setLog={setSummaryLog} />}
+        {tab === "summary" && <TabSummary onAddHistory={addToHistory} SYS={SYS} log={summaryLog} setLog={setSummaryLog} onDetectActions={detectAndSaveActions} />}
         {tab === "library" && <TabLibrary onUse={(p) => { setTransformInput(p); setTab("transform"); }} />}
         {tab === "notes" && <TabNotes />}
         {tab === "history" && <TabHistory history={history} loading={historyLoading} error={historyError} onClear={() => { if (window.confirm("Effacer tout l'historique ?")) setHistory([]); }} />}

@@ -221,6 +221,83 @@ app.delete("/api/parking/:id", async (req, res) => {
   } catch (err) { console.log("[parking] Delete error:", err.message); res.status(500).json({ error: err.message }); }
 });
 
+// ── User Actions (zen_user_actions) ──
+
+app.post("/api/actions", async (req, res) => {
+  try {
+    const { session_id, source, description, context, priority = "normale", due_hint } = req.body;
+    const { data, error } = await supabase.from("zen_user_actions")
+      .insert({ session_id, source, description, context, priority, status: "a_faire", due_hint })
+      .select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { console.log("[actions] Create error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/actions/session/:sessionId", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_user_actions").select("*")
+      .eq("session_id", req.params.sessionId).order("created_at", { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/api/actions/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("zen_user_actions")
+      .update(req.body).eq("id", req.params.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/actions/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("zen_user_actions").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/actions/detect", async (req, res) => {
+  try {
+    const { session_id, source, text } = req.body;
+    if (!session_id || !text) return res.json({ detected: 0, actions: [] });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const sys = `Analyse cette reponse de Claude Code et extrait UNIQUEMENT les actions que l'utilisateur doit faire manuellement.
+Cherche: "vous devez", "il faudra", "assurez-vous", "testez manuellement", "obtenez", "configurez", "activez", "ajoutez", "lancez", "executez", "copiez", "creez manuellement".
+Priorite haute si "critique", "bloquant", "avant de continuer". Basse si optionnel. Normale sinon.
+Reponds UNIQUEMENT en JSON: {"actions": [{"description": "action courte", "context": "pourquoi en 1 phrase", "priority": "haute|normale|basse"}]}
+Si aucune action manuelle: {"actions": []}`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, system: sys, messages: [{ role: "user", content: text.slice(0, 4000) }] })
+    });
+    const d = await response.json();
+    const raw = (d.content || []).map(b => b.text || "").join("");
+    let actions = [];
+    try {
+      const parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+      actions = (parsed.actions || []).filter(a => a.description?.trim());
+    } catch {}
+
+    const created = [];
+    for (const a of actions) {
+      try {
+        const { data, error } = await supabase.from("zen_user_actions")
+          .insert({ session_id, source, description: a.description.trim(), context: a.context || "", priority: a.priority || "normale", status: "a_faire" })
+          .select().single();
+        if (!error && data) created.push(data);
+      } catch {}
+    }
+    console.log(`[actions/detect] ${source}: ${created.length} actions created`);
+    res.json({ detected: created.length, actions: created });
+  } catch (err) { console.log("[actions/detect] error:", err.message); res.status(500).json({ error: err.message, actions: [] }); }
+});
+
 app.use(express.static(join(__dirname, "dist")));
 app.get("/{*path}", (req, res) => {
   res.sendFile(join(__dirname, "dist", "index.html"));
