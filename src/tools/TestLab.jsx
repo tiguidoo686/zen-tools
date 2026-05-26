@@ -496,7 +496,15 @@ export default function TestLab() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  useEffect(() => { if (view === "history") loadHistory(); }, [view]);
+  // Purge state
+  const [purgeRecords, setPurgeRecords] = useState(null);
+  const [purgeLoading, setPurgeLoading] = useState(false);
+  const [purgeResult, setPurgeResult] = useState(null);
+
+  useEffect(() => {
+    if (view === "history") loadHistory();
+    if (view === "purge") { setPurgeRecords(null); setPurgeResult(null); }
+  }, [view]);
 
   async function loadHistory() {
     setHistoryLoading(true);
@@ -546,6 +554,27 @@ export default function TestLab() {
     setSessionItems(prev => ({ ...prev, [itemId]: { status, notes: notes ?? prev[itemId]?.notes ?? "" } }));
   }
 
+  async function loadPurgePreview() {
+    setPurgeLoading(true); setPurgeResult(null);
+    try {
+      const res = await fetch("/api/test-records");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur serveur");
+      setPurgeRecords(data);
+    } catch (e) { setPurgeRecords({ error: e.message }); }
+    setPurgeLoading(false);
+  }
+
+  async function executePurge() {
+    try {
+      const res = await fetch("/api/test-records", { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur serveur");
+      setPurgeResult(data);
+      setPurgeRecords({ sessions: [], history: [], total: 0 });
+    } catch (e) { setPurgeResult({ error: e.message }); }
+  }
+
   async function finishSession() {
     setShowReport(true);
     setRunnerMode(false);
@@ -580,6 +609,7 @@ export default function TestLab() {
     { id: "prebuild", label: "🚦 Pre-Build" },
     { id: "whatbroke", label: "🔍 Debug Rapide" },
     { id: "history", label: "🕐 Historique" },
+    { id: "purge", label: "🗑️ Purger" },
   ];
 
   return (
@@ -666,6 +696,84 @@ export default function TestLab() {
 
         {/* ── HISTORY ── */}
         {view === "history" && <TestHistory history={history} loading={historyLoading} />}
+
+        {/* ── PURGE ── */}
+        {view === "purge" && (
+          <div>
+            <div style={{ ...cs.card, background: "#0d0d14", border: "1px solid #dc2626" }}>
+              <label style={{ ...cs.lbl, color: "#fca5a5" }}>PURGER LES DONNÉES DE TEST</label>
+              <p style={{ fontSize: 13, color: "#9e96c0", margin: "0 0 14px" }}>
+                Supprime tous les enregistrements avec le préfixe [ZEN_TEST] dans zen_sessions et zen_tools_history. Les actions et étapes liées sont supprimées en cascade. Cette action est irréversible.
+              </p>
+              <button onClick={loadPurgePreview} disabled={purgeLoading}
+                style={{ ...cs.btnRed, width: "100%", fontWeight: 700, padding: "11px 20px", fontSize: 14 }}>
+                {purgeLoading ? "⏳ Chargement..." : "🔍 Voir les enregistrements à supprimer"}
+              </button>
+            </div>
+
+            {purgeRecords && !purgeRecords.error && (
+              <div style={cs.card}>
+                <label style={cs.lbl}>ENREGISTREMENTS TROUVÉS — {purgeRecords.total} au total</label>
+                {purgeRecords.total === 0 ? (
+                  <p style={{ fontSize: 13, color: "#16a34a", margin: 0 }}>✓ Aucun enregistrement de test à supprimer.</p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 12, color: "#7b6fa0", marginBottom: 12 }}>
+                      Sessions : <strong>{purgeRecords.sessions?.length || 0}</strong> · Historique : <strong>{purgeRecords.history?.length || 0}</strong>
+                    </p>
+                    <div style={{ background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: 8, padding: "0.75rem", marginBottom: 14, maxHeight: 200, overflowY: "auto" }}>
+                      {(purgeRecords.sessions || []).map(s => (
+                        <p key={s.id} style={{ fontSize: 12, color: "#7f1d1d", margin: "2px 0", fontFamily: "monospace" }}>
+                          [SESSION] {s.objective} ({new Date(s.created_at).toLocaleDateString("fr-CA")})
+                        </p>
+                      ))}
+                      {(purgeRecords.history || []).map(h => (
+                        <p key={h.id} style={{ fontSize: 12, color: "#7f1d1d", margin: "2px 0", fontFamily: "monospace" }}>
+                          [HISTORIQUE] {(h.prompt || "").slice(0, 70)} ({new Date(h.created_at).toLocaleDateString("fr-CA")})
+                        </p>
+                      ))}
+                    </div>
+                    <button onClick={() => setModal({
+                      title: "🗑️ Confirmer la purge",
+                      message: `Tu es sur le point de supprimer ${purgeRecords.total} enregistrement(s) de test. Cette action est irréversible.`,
+                      preview: [
+                        ...(purgeRecords.sessions || []).map(s => `[SESSION] ${s.objective} (${new Date(s.created_at).toLocaleDateString("fr-CA")})`),
+                        ...(purgeRecords.history || []).map(h => `[HISTORIQUE] ${(h.prompt || "").slice(0, 60)} (${new Date(h.created_at).toLocaleDateString("fr-CA")})`),
+                      ],
+                      requireType: true,
+                      confirmLabel: "🗑️ Supprimer définitivement",
+                      onConfirm: executePurge,
+                    })}
+                      style={{ ...cs.btnRed, width: "100%", fontWeight: 700, padding: "11px 20px", fontSize: 14 }}>
+                      🗑️ Purger {purgeRecords.total} enregistrement(s)
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {purgeRecords?.error && (
+              <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #fca5a5" }}>
+                <p style={{ fontSize: 13, color: "#dc2626", margin: 0 }}>❌ {purgeRecords.error}</p>
+              </div>
+            )}
+
+            {purgeResult && !purgeResult.error && (
+              <div style={{ ...cs.card, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "#16a34a", margin: "0 0 6px" }}>✅ Purge terminée</p>
+                <p style={{ fontSize: 13, color: "#374151", margin: 0 }}>
+                  {purgeResult.deleted} enregistrement(s) supprimé(s) — Sessions : {purgeResult.sessions} · Historique : {purgeResult.history} · Restants : 0
+                </p>
+              </div>
+            )}
+
+            {purgeResult?.error && (
+              <div style={{ ...cs.card, background: "#fff0f0", border: "1px solid #fca5a5" }}>
+                <p style={{ fontSize: 13, color: "#dc2626", margin: 0 }}>❌ Erreur lors de la purge : {purgeResult.error}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

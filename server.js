@@ -350,6 +350,39 @@ Si aucune action manuelle: {"actions": []}`;
   } catch (err) { console.log("[actions/detect] error:", err.message); res.status(500).json({ error: err.message, actions: [] }); }
 });
 
+app.get("/api/test-records", async (req, res) => {
+  try {
+    const { data: sessions, error: se } = await supabase.from("zen_sessions")
+      .select("id, objective, created_at").ilike("objective", "[ZEN_TEST]%");
+    if (se) throw se;
+    const { data: history, error: he } = await supabase.from("zen_tools_history")
+      .select("id, prompt, created_at").ilike("prompt", "[ZEN_TEST]%");
+    if (he) throw he;
+    res.json({ sessions: sessions || [], history: history || [], total: (sessions?.length || 0) + (history?.length || 0) });
+  } catch (err) { console.log("[test-records] Fetch error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/api/test-records", async (req, res) => {
+  try {
+    const { data: sessions } = await supabase.from("zen_sessions").select("id").ilike("objective", "[ZEN_TEST]%");
+    let deletedSessions = 0;
+    if (sessions?.length) {
+      const { error: de } = await supabase.from("zen_sessions").delete().ilike("objective", "[ZEN_TEST]%");
+      if (de) throw de;
+      deletedSessions = sessions.length;
+    }
+    const { data: history } = await supabase.from("zen_tools_history").select("id").ilike("prompt", "[ZEN_TEST]%");
+    let deletedHistory = 0;
+    if (history?.length) {
+      const { error: dhe } = await supabase.from("zen_tools_history").delete().ilike("prompt", "[ZEN_TEST]%");
+      if (dhe) throw dhe;
+      deletedHistory = history.length;
+    }
+    const deleted = deletedSessions + deletedHistory;
+    res.json({ deleted, sessions: deletedSessions, history: deletedHistory });
+  } catch (err) { console.log("[test-records] Delete error:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 app.use(express.static(join(__dirname, "dist")));
 app.get("/{*path}", (req, res) => {
   res.sendFile(join(__dirname, "dist", "index.html"));
