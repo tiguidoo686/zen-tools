@@ -431,6 +431,110 @@ app.delete("/api/test-records", async (req, res) => {
   } catch (err) { console.log("[test-records] Delete error:", err.message); res.status(500).json({ error: err.message }); }
 });
 
+// ── Test Lab Analyzer ──
+
+app.post("/api/test-lab/analyze", async (req, res) => {
+  try {
+    const { prompt, response, repairOnly = false } = req.body;
+    if (!prompt?.trim() || !response?.trim())
+      return res.status(400).json({ error: "Prompt et réponse requis" });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    const sys = repairOnly
+      ? `Tu es un expert QA pour ZenAlpha, une app React Native de gestion de construction.
+L'utilisateur a envoyé un prompt à Claude Code mais la réponse est incomplète ou incorrecte.
+Génère un message de réparation clair que l'utilisateur peut copier-coller à Claude Code pour corriger le problème.
+Le message doit: identifier précisément ce qui manque ou est faux, demander la correction de façon directe, être en français.
+Réponds UNIQUEMENT avec le message de réparation (pas de JSON, pas d'explication), max 200 mots.`
+      : `Tu es un expert QA pour ZenAlpha, une app React Native de gestion de construction au Québec.
+Analyse si la réponse de Claude Code répond correctement au prompt de l'utilisateur.
+Évalue selon 7 catégories et réponds UNIQUEMENT en JSON valide:
+{
+  "verdict": "PASS|FAIL",
+  "score": { "passed": number, "total": 7 },
+  "tests": {
+    "completeness": [{ "label": "texte", "status": "pass|fail|warn", "detail": "explication courte si fail/warn" }],
+    "file_integrity": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }],
+    "architecture": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }],
+    "dependencies": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }],
+    "logic": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }],
+    "missing_pieces": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }],
+    "dangerous_patterns": [{ "label": "texte", "status": "pass|fail|warn", "detail": "..." }]
+  },
+  "problems": [{ "title": "titre court", "description": "explication", "fix": "correction suggérée" }],
+  "repair_message": "message prêt à copier-coller à Claude Code si des problèmes existent, sinon chaîne vide"
+}
+Règles: verdict PASS si 5+ catégories vertes, FAIL sinon. problems: max 5 entrées pour les cas fail/warn. repair_message: max 150 mots, en français, directement actionnable.`;
+
+    const userMsg = repairOnly
+      ? `PROMPT ORIGINAL:\n${prompt.slice(0, 3000)}\n\nRÉPONSE CLAUDE CODE:\n${response.slice(0, 5000)}`
+      : `PROMPT DE L'UTILISATEUR:\n${prompt.slice(0, 3000)}\n\nRÉPONSE DE CLAUDE CODE:\n${response.slice(0, 5000)}`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    let raw;
+    try {
+      const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, system: sys, messages: [{ role: "user", content: userMsg }] }),
+        signal: controller.signal,
+      });
+      const d = await apiRes.json();
+      if (!apiRes.ok) throw new Error(d?.error?.message || "Erreur Haiku");
+      raw = (d.content || []).map(b => b.text || "").join("");
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (repairOnly) {
+      return res.json({ repair_message: raw.trim() });
+    }
+
+    let result;
+    try {
+      result = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim());
+    } catch {
+      return res.status(500).json({ error: "Réponse non parseable — réessaie" });
+    }
+
+    try {
+      const promptSummary = prompt.slice(0, 120);
+      const scorePassed = result.score?.passed ?? 0;
+      const scoreTotal = result.score?.total ?? 7;
+      await supabase.from("zen_test_history").insert({
+        prompt_summary: promptSummary,
+        score_passed: scorePassed,
+        score_total: scoreTotal,
+        verdict: result.verdict,
+        problems: result.problems || [],
+        repair_message: result.repair_message || "",
+      });
+    } catch {}
+
+    res.json(result);
+  } catch (err) {
+    console.log("[test-lab/analyze] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/test-lab/history", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("zen_test_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.log("[test-lab/history] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.static(join(__dirname, "dist")));
 app.get("/{*path}", (req, res) => {
   res.sendFile(join(__dirname, "dist", "index.html"));

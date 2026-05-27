@@ -7,10 +7,10 @@ import TestLab from './tools/TestLab'
 
 const TOOLS = [
   { path: '/transformateur', icon: '✦', title: 'Transformateur de prompt', desc: 'Transforme tes idées en prompts parfaits pour Claude Code', color: '#534AB7' },
+  { path: '/testlab', icon: '🧪', title: 'Test Lab', desc: 'Analyse la réponse de Claude Code en 7 catégories — verdict, problèmes, réparation', color: '#dc2626' },
   { path: '/masterclass', icon: '🎓', title: 'Claude Max Masterclass', desc: 'Apprends à utiliser Claude Max à pleine capacité', color: '#7c3aed' },
   { path: '/apprentissage', icon: '📖', title: 'Apprendre le code', desc: 'Les bases du développement expliquées simplement', color: '#0891b2' },
   { path: '/translator', icon: '🔍', title: 'Claude Translator', desc: "Comprends ce que fait une commande — évalue les risques avant d'exécuter", color: '#059669' },
-  { path: '/testlab', icon: '🧪', title: 'Test Lab', desc: 'Génère et exécute des checklists de tests complètes pour ZenAlpha avant le terrain', color: '#dc2626' },
 ]
 
 function Home() {
