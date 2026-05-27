@@ -535,6 +535,195 @@ app.get("/api/test-lab/history", async (req, res) => {
   }
 });
 
+// ── TestLab endpoints ──
+
+const ALLOWED_TABLES = new Set([
+  "entrees_heures", "depenses", "factures", "facture_lignes",
+  "rappels", "chantier", "emails_cache", "quickbooks_tokens",
+  "conversation", "employes", "clients", "memoire_resumee",
+  "zen_sessions", "zen_steps", "zen_parking_lot",
+  "zen_tools_history", "zen_user_actions", "zen_test_history",
+]);
+
+const ZENALPHA_URL = process.env.ZENALPHA_URL || "https://urbanfinancialseahorse-production.up.railway.app";
+const ZENALPHA_SECRET = process.env.ZENALPHA_APP_SECRET || "5c05c08659e9ff6c6f886575d98df646b1cdeca218ac0647";
+
+// Supabase client for ZenAlpha DB (falls back to existing if same instance)
+const zenalphaSupabase = createClient(
+  process.env.ZENALPHA_SUPABASE_URL || process.env.SUPABASE_URL,
+  process.env.ZENALPHA_SUPABASE_KEY || process.env.SUPABASE_KEY
+);
+
+app.post("/testlab/verify-db", async (req, res) => {
+  try {
+    const { table, conditions = {}, requiredColumns = [], nullColumns = [], forbiddenValues = {}, timeWindow, maxRowCount, requiredValues = {} } = req.body;
+
+    if (!ALLOWED_TABLES.has(table)) {
+      return res.status(400).json({ error: "Table non autorisée", table, pass: false });
+    }
+
+    let query = zenalphaSupabase.from(table).select("*");
+
+    if (timeWindow) {
+      const since = new Date(Date.now() - Number(timeWindow) * 1000).toISOString();
+      query = query.gte("created_at", since);
+    }
+
+    for (const [key, value] of Object.entries(conditions)) {
+      if (key === "heure_fin_not_null" && value === true) {
+        query = query.not("heure_fin", "is", null);
+      } else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        query = query.eq(key, value);
+      }
+    }
+
+    query = query.order("created_at", { ascending: false }).limit(maxRowCount ? maxRowCount + 1 : 5);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = data || [];
+    const found = rows.length > 0;
+    const row = rows[0] || null;
+
+    const missingColumns = [];
+    if (row) {
+      for (const col of requiredColumns) {
+        const v = row[col];
+        if (v === null || v === undefined || v === "" || v === "undefined" || v === "null") {
+          missingColumns.push(col);
+        }
+      }
+    }
+
+    const forbiddenFound = [];
+    if (row) {
+      for (const [col, badValues] of Object.entries(forbiddenValues)) {
+        const rv = row[col];
+        if (badValues.includes(rv)) forbiddenFound.push(`${col} = ${JSON.stringify(rv)}`);
+      }
+    }
+
+    const missingRequiredValues = [];
+    if (row) {
+      for (const [col, expected] of Object.entries(requiredValues)) {
+        if (row[col] !== expected) missingRequiredValues.push(`${col} attendu ${expected}, trouvé ${row[col]}`);
+      }
+    }
+
+    const pass = found && missingColumns.length === 0 && forbiddenFound.length === 0 && missingRequiredValues.length === 0;
+    res.json({ found, row, rows, rowCount: rows.length, missingColumns, forbiddenFound, missingRequiredValues, pass });
+  } catch (err) {
+    console.log("[testlab/verify-db] error:", err.message);
+    res.status(500).json({ error: err.message, pass: false });
+  }
+});
+
+app.post("/testlab/verify-api", async (req, res) => {
+  try {
+    const { endpoint, method = "GET", payload, expectedFields = [], forbiddenValues = {} } = req.body;
+    if (!endpoint) return res.status(400).json({ error: "endpoint requis", pass: false });
+
+    const url = endpoint.startsWith("http") ? endpoint : `${ZENALPHA_URL}${endpoint}`;
+    const start = Date.now();
+
+    const fetchRes = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", "x-app-secret": ZENALPHA_SECRET },
+      ...(payload && method !== "GET" ? { body: JSON.stringify(payload) } : {}),
+    });
+
+    const durationMs = Date.now() - start;
+    let responseBody;
+    try { responseBody = await fetchRes.json(); } catch { responseBody = { _raw: await fetchRes.text().catch(() => "") }; }
+
+    const missingFields = [];
+    for (const field of expectedFields) {
+      const v = responseBody[field];
+      if (v === null || v === undefined) missingFields.push(field);
+    }
+
+    const forbiddenFound = [];
+    for (const [field, badValues] of Object.entries(forbiddenValues)) {
+      if (badValues.includes(responseBody[field])) forbiddenFound.push(`${field} = ${JSON.stringify(responseBody[field])}`);
+    }
+
+    const pass = fetchRes.ok && missingFields.length === 0 && forbiddenFound.length === 0;
+    res.json({ statusCode: fetchRes.status, responseBody, missingFields, forbiddenFound, pass, durationMs });
+  } catch (err) {
+    console.log("[testlab/verify-api] error:", err.message);
+    res.status(500).json({ error: err.message, pass: false, durationMs: 0 });
+  }
+});
+
+app.post("/testlab/generate", async (req, res) => {
+  try {
+    const { featureDescription, context } = req.body;
+    if (!featureDescription?.trim()) return res.status(400).json({ error: "featureDescription requis" });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    const sys = `Tu es un expert QA pour ZenAlpha, une app React Native de gestion de construction au Québec.
+Génère un TestCase JSON complet pour tester la fonctionnalité décrite.
+Structure JSON exacte (réponds UNIQUEMENT avec ce JSON):
+{
+  "id": "auto-PLACEHOLDER",
+  "name": "Nom court du test en français",
+  "category": "heures|depenses|factures|rappels|chantiers|emails|quickbooks|conversations|outils",
+  "steps": [
+    { "order": 1, "action": "message|wait|db|api", "description": "Description de l'étape en français", "payload": { "message": "texte" } },
+    { "order": 2, "action": "wait", "description": "Attendre X secondes", "payload": { "seconds": 3 } },
+    { "order": 3, "action": "db", "description": "Vérifier en base de données", "sqlVerification": { "table": "nom_table", "timeWindow": 60, "requiredColumns": ["col1", "col2"], "forbiddenValues": { "col1": [null, "undefined"] } } }
+  ],
+  "expectedResult": {
+    "description": "Ce qui doit se passer en français",
+    "supabaseTable": "nom_table",
+    "requiredColumns": ["col1"],
+    "forbiddenValues": { "id": [null] }
+  }
+}
+Règles: minimum 3 steps, au moins 1 step db avec sqlVerification, au moins 1 forbiddenValues.`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001", max_tokens: 1500, system: sys,
+        messages: [{ role: "user", content: `Fonctionnalité: ${featureDescription}\nContexte: ${context || "ZenAlpha app de gestion de construction"}` }]
+      })
+    });
+
+    const d = await response.json();
+    if (!response.ok) throw new Error(d?.error?.message || "Erreur Haiku");
+    const raw = (d.content || []).map(b => b.text || "").join("");
+
+    let testCase;
+    try { testCase = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()); }
+    catch { throw new Error("Réponse non parseable — réessaie"); }
+
+    testCase.id = `auto-${Date.now()}`;
+    res.json(testCase);
+  } catch (err) {
+    console.log("[testlab/generate] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/testlab/export-master", async (req, res) => {
+  try {
+    const { content, section } = req.body;
+    const { readFile, writeFile } = await import("fs/promises");
+    const masterPath = join(__dirname, "MASTER.md");
+    let existing = "";
+    try { existing = await readFile(masterPath, "utf8"); } catch {}
+    const appendText = `\n---\n<!-- Ajouté automatiquement le ${new Date().toISOString()} — Section ${section} -->\n${content}\n`;
+    await writeFile(masterPath, existing + appendText);
+    res.json({ ok: true });
+  } catch (err) {
+    console.log("[testlab/export-master] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.static(join(__dirname, "dist")));
 app.get("/{*path}", (req, res) => {
   res.sendFile(join(__dirname, "dist", "index.html"));
