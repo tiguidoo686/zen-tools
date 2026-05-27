@@ -470,23 +470,14 @@ Règles: verdict PASS si 5+ catégories vertes, FAIL sinon. problems: max 5 entr
       ? `PROMPT ORIGINAL:\n${prompt.slice(0, 3000)}\n\nRÉPONSE CLAUDE CODE:\n${response.slice(0, 5000)}`
       : `PROMPT DE L'UTILISATEUR:\n${prompt.slice(0, 3000)}\n\nRÉPONSE DE CLAUDE CODE:\n${response.slice(0, 5000)}`;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
-
-    let raw;
-    try {
-      const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, system: sys, messages: [{ role: "user", content: userMsg }] }),
-        signal: controller.signal,
-      });
-      const d = await apiRes.json();
-      if (!apiRes.ok) throw new Error(d?.error?.message || "Erreur Haiku");
-      raw = (d.content || []).map(b => b.text || "").join("");
-    } finally {
-      clearTimeout(timeout);
-    }
+    const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 2000, system: sys, messages: [{ role: "user", content: userMsg }] }),
+    });
+    const d = await apiRes.json();
+    if (!apiRes.ok) throw new Error(d?.error?.message || "Erreur Haiku");
+    const raw = (d.content || []).map(b => b.text || "").join("");
 
     if (repairOnly) {
       return res.json({ repair_message: raw.trim() });
@@ -548,12 +539,6 @@ const ALLOWED_TABLES = new Set([
 const ZENALPHA_URL = process.env.ZENALPHA_URL || "https://urbanfinancialseahorse-production.up.railway.app";
 const ZENALPHA_SECRET = process.env.ZENALPHA_APP_SECRET || "5c05c08659e9ff6c6f886575d98df646b1cdeca218ac0647";
 
-// Supabase client for ZenAlpha DB (falls back to existing if same instance)
-const zenalphaSupabase = createClient(
-  process.env.ZENALPHA_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.ZENALPHA_SUPABASE_KEY || process.env.SUPABASE_KEY
-);
-
 app.post("/testlab/verify-db", async (req, res) => {
   try {
     const { table, conditions = {}, requiredColumns = [], nullColumns = [], forbiddenValues = {}, timeWindow, maxRowCount, requiredValues = {} } = req.body;
@@ -562,7 +547,7 @@ app.post("/testlab/verify-db", async (req, res) => {
       return res.status(400).json({ error: "Table non autorisée", table, pass: false });
     }
 
-    let query = zenalphaSupabase.from(table).select("*");
+    let query = supabase.from(table).select("*");
 
     if (timeWindow) {
       const since = new Date(Date.now() - Number(timeWindow) * 1000).toISOString();
